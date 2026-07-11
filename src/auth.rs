@@ -11,6 +11,7 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 use url::Url;
 
+use crate::apps;
 use crate::config;
 
 const DEFAULT_CLIENT_ID: &str =
@@ -100,6 +101,13 @@ pub fn login() -> Result<()> {
     match token.id_token.as_deref().and_then(email_from_id_token) {
         Some(email) => println!("Logged in as {email}"),
         None => println!("Logged in successfully"),
+    }
+    if let Err(err) = apps::select_and_save(&token.access_token) {
+        eprintln!("Warning: app selection failed: {err:#}");
+        eprintln!(
+            "Set app_id in {} manually",
+            config::config_path()?.display()
+        );
     }
     Ok(())
 }

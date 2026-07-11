@@ -7,10 +7,24 @@ use anyhow::{bail, Context, Result};
 use zip::ZipArchive;
 
 use crate::api::Client;
+use crate::apps;
+use crate::auth;
 use crate::config;
+use crate::config::Config;
+
+fn load_or_select_config() -> Result<Config> {
+    match config::load_optional()? {
+        Some(config) => Ok(config),
+        None => {
+            let token = auth::get_access_token()?;
+            apps::select_and_save(&token)?;
+            config::load()
+        }
+    }
+}
 
 pub fn list() -> Result<()> {
-    let config = config::load()?;
+    let config = load_or_select_config()?;
     let client = Client::new(&config)?;
     let releases = client.list_releases()?;
     if releases.is_empty() {
@@ -52,7 +66,7 @@ pub fn list() -> Result<()> {
 }
 
 pub fn install(id: &str) -> Result<()> {
-    let config = config::load()?;
+    let config = load_or_select_config()?;
     let client = Client::new(&config)?;
     let release_id = id.rsplit('/').next().unwrap_or(id);
     let release = client.get_release(release_id)?;

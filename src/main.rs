@@ -1,4 +1,5 @@
 mod api;
+mod apps;
 mod auth;
 mod commands;
 mod config;

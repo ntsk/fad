@@ -150,7 +150,7 @@ impl Client {
     }
 }
 
-fn check(resp: reqwest::blocking::Response) -> Result<reqwest::blocking::Response> {
+pub(crate) fn check(resp: reqwest::blocking::Response) -> Result<reqwest::blocking::Response> {
     let status = resp.status();
     if status.is_success() {
         return Ok(resp);
