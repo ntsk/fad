@@ -45,7 +45,10 @@ impl Release {
     }
 
     pub fn version(&self) -> String {
-        match (self.display_version.is_empty(), self.build_version.is_empty()) {
+        match (
+            self.display_version.is_empty(),
+            self.build_version.is_empty(),
+        ) {
             (false, false) => format!("{} ({})", self.display_version, self.build_version),
             (false, true) => self.display_version.clone(),
             (true, false) => self.build_version.clone(),
@@ -99,8 +102,7 @@ impl Client {
             .send()
             .context("failed to reach the App Distribution API")?;
         let resp = check(resp)?;
-        let list: ListReleasesResponse =
-            resp.json().context("failed to parse the release list")?;
+        let list: ListReleasesResponse = resp.json().context("failed to parse the release list")?;
         Ok(list.releases)
     }
 
@@ -112,7 +114,9 @@ impl Client {
             .send()
             .context("failed to reach the App Distribution API")?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            bail!("release not found: {release_id} (run `fad install --list` to see available IDs)");
+            bail!(
+                "release not found: {release_id} (run `fad install --list` to see available IDs)"
+            );
         }
         let resp = check(resp)?;
         resp.json().context("failed to parse the release")
@@ -130,8 +134,10 @@ impl Client {
         let resp = check(resp)?;
         let progress = match resp.content_length() {
             Some(total) => ProgressBar::new(total).with_style(
-                ProgressStyle::with_template("{bar:40} {bytes}/{total_bytes} ({bytes_per_sec}, {eta})")?
-                    .progress_chars("=> "),
+                ProgressStyle::with_template(
+                    "{bar:40} {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
+                )?
+                .progress_chars("=> "),
             ),
             None => ProgressBar::new_spinner(),
         };

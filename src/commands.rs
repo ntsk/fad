@@ -28,8 +28,18 @@ pub fn list() -> Result<()> {
             )
         })
         .collect();
-    let id_width = rows.iter().map(|r| r.0.len()).max().unwrap_or(0).max("ID".len());
-    let version_width = rows.iter().map(|r| r.1.len()).max().unwrap_or(0).max("VERSION".len());
+    let id_width = rows
+        .iter()
+        .map(|r| r.0.len())
+        .max()
+        .unwrap_or(0)
+        .max("ID".len());
+    let version_width = rows
+        .iter()
+        .map(|r| r.1.len())
+        .max()
+        .unwrap_or(0)
+        .max("VERSION".len());
     println!(
         "{:<id_width$}  {:<version_width$}  {:<16}  {}",
         "ID", "VERSION", "CREATED", "NOTES"
@@ -46,7 +56,11 @@ pub fn install(id: &str) -> Result<()> {
     let client = Client::new(&config)?;
     let release_id = id.rsplit('/').next().unwrap_or(id);
     let release = client.get_release(release_id)?;
-    println!("Installing release {} (version {})", release.id(), release.version());
+    println!(
+        "Installing release {} (version {})",
+        release.id(),
+        release.version()
+    );
 
     let temp_dir = tempfile::tempdir().context("failed to create a temporary directory")?;
     let download_path = temp_dir.path().join("release.bin");
@@ -162,7 +176,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("app.bin");
         write_zip(&path, "BundleConfig.pb");
-        assert!(matches!(detect_binary_kind(&path).unwrap(), BinaryKind::Aab));
+        assert!(matches!(
+            detect_binary_kind(&path).unwrap(),
+            BinaryKind::Aab
+        ));
     }
 
     #[test]
@@ -170,7 +187,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("app.bin");
         write_zip(&path, "AndroidManifest.xml");
-        assert!(matches!(detect_binary_kind(&path).unwrap(), BinaryKind::Apk));
+        assert!(matches!(
+            detect_binary_kind(&path).unwrap(),
+            BinaryKind::Apk
+        ));
     }
 
     #[test]

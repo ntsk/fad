@@ -174,7 +174,11 @@ fn wait_for_code(listener: &TcpListener, expected_state: &str) -> Result<String>
         };
         let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
         if let Some(error) = params.get("error") {
-            respond(&mut stream, "200 OK", "Login failed. You can close this tab.");
+            respond(
+                &mut stream,
+                "200 OK",
+                "Login failed. You can close this tab.",
+            );
             bail!("authorization was denied: {error}");
         }
         match (params.get("code"), params.get("state")) {
@@ -242,8 +246,7 @@ fn save_credentials(credentials: &Credentials) -> Result<()> {
 
 fn load_credentials() -> Result<Credentials> {
     let path = credentials_path()?;
-    let text = std::fs::read_to_string(&path)
-        .context("not logged in; run `fad login` first")?;
+    let text = std::fs::read_to_string(&path).context("not logged in; run `fad login` first")?;
     serde_json::from_str(&text)
         .with_context(|| format!("failed to parse {}; run `fad login` again", path.display()))
 }

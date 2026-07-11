@@ -52,8 +52,8 @@ pub fn load_optional() -> Result<Option<Config>> {
         Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
         Err(e) => return Err(e).context(format!("failed to read {}", path.display())),
     };
-    let config = toml::from_str(&text)
-        .with_context(|| format!("failed to parse {}", path.display()))?;
+    let config =
+        toml::from_str(&text).with_context(|| format!("failed to parse {}", path.display()))?;
     Ok(Some(config))
 }
 
