@@ -66,3 +66,31 @@ pub fn load() -> Result<Config> {
         ),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn extracts_project_number_from_app_id() {
+        let config: Config =
+            toml::from_str("app_id = \"1:1234567890:android:0a1b2c3d4e5f\"").unwrap();
+        assert_eq!(config.project_number().unwrap(), "1234567890");
+    }
+
+    #[test]
+    fn rejects_invalid_app_id() {
+        let config: Config = toml::from_str("app_id = \"not-an-app-id\"").unwrap();
+        assert!(config.project_number().is_err());
+    }
+
+    #[test]
+    fn parses_optional_oauth_section() {
+        let config: Config = toml::from_str(
+            "app_id = \"1:1:android:a\"\n[oauth]\nclient_id = \"cid\"\nclient_secret = \"cs\"",
+        )
+        .unwrap();
+        assert_eq!(config.oauth.client_id.as_deref(), Some("cid"));
+        assert_eq!(config.oauth.client_secret.as_deref(), Some("cs"));
+    }
+}

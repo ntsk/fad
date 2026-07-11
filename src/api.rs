@@ -165,3 +165,44 @@ fn api_error_message(body: &str) -> String {
         .and_then(|v| v.get("error")?.get("message")?.as_str().map(str::to_string))
         .unwrap_or_else(|| body.to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn release(value: serde_json::Value) -> Release {
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn extracts_release_id_from_resource_name() {
+        let release = release(serde_json::json!({
+            "name": "projects/123/apps/1:123:android:abc/releases/r1"
+        }));
+        assert_eq!(release.id(), "r1");
+    }
+
+    #[test]
+    fn formats_version_from_display_and_build() {
+        let release = release(serde_json::json!({
+            "name": "n",
+            "displayVersion": "1.2.3",
+            "buildVersion": "45"
+        }));
+        assert_eq!(release.version(), "1.2.3 (45)");
+    }
+
+    #[test]
+    fn falls_back_when_versions_are_missing() {
+        let release = release(serde_json::json!({ "name": "n" }));
+        assert_eq!(release.version(), "-");
+        assert_eq!(release.notes(), "");
+    }
+
+    #[test]
+    fn extracts_api_error_message_from_json_body() {
+        let body = "{\"error\": {\"message\": \"boom\"}}";
+        assert_eq!(api_error_message(body), "boom");
+        assert_eq!(api_error_message("plain"), "plain");
+    }
+}

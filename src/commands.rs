@@ -140,3 +140,56 @@ fn summarize(notes: &str, max_chars: usize) -> String {
     }
     summary
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Write;
+    use zip::write::SimpleFileOptions;
+
+    fn write_zip(path: &Path, entry_name: &str) {
+        let file = File::create(path).unwrap();
+        let mut writer = zip::ZipWriter::new(file);
+        writer
+            .start_file(entry_name, SimpleFileOptions::default())
+            .unwrap();
+        writer.write_all(b"data").unwrap();
+        writer.finish().unwrap();
+    }
+
+    #[test]
+    fn detects_aab_by_bundle_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.bin");
+        write_zip(&path, "BundleConfig.pb");
+        assert!(matches!(detect_binary_kind(&path).unwrap(), BinaryKind::Aab));
+    }
+
+    #[test]
+    fn detects_apk_by_manifest() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.bin");
+        write_zip(&path, "AndroidManifest.xml");
+        assert!(matches!(detect_binary_kind(&path).unwrap(), BinaryKind::Apk));
+    }
+
+    #[test]
+    fn rejects_unknown_binary() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.bin");
+        write_zip(&path, "something-else.txt");
+        assert!(detect_binary_kind(&path).is_err());
+    }
+
+    #[test]
+    fn formats_create_time_for_display() {
+        assert_eq!(format_time("2026-07-10T03:12:45.678Z"), "2026-07-10 03:12");
+    }
+
+    #[test]
+    fn summarizes_notes_to_first_line_with_limit() {
+        assert_eq!(summarize("first line\nsecond", 50), "first line");
+        assert_eq!(summarize("abcdef", 3), "abc…");
+        assert_eq!(summarize("", 10), "");
+    }
+}
