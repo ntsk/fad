@@ -62,6 +62,22 @@ impl Release {
             .map(|notes| notes.text.as_str())
             .unwrap_or("")
     }
+
+    pub fn binary_type(&self) -> &'static str {
+        let path = self
+            .binary_download_uri
+            .split(['?', '#'])
+            .next()
+            .unwrap_or("")
+            .to_ascii_lowercase();
+        if path.ends_with(".apk") {
+            "APK"
+        } else if path.ends_with(".aab") {
+            "AAB"
+        } else {
+            "-"
+        }
+    }
 }
 
 pub struct Client {
@@ -203,6 +219,22 @@ mod tests {
         let release = release(serde_json::json!({ "name": "n" }));
         assert_eq!(release.version(), "-");
         assert_eq!(release.notes(), "");
+    }
+
+    #[test]
+    fn detects_binary_type_from_download_uri() {
+        let apk = release(serde_json::json!({
+            "name": "n",
+            "binaryDownloadUri": "https://example.com/binaries/abc/app.apk?token=x.y"
+        }));
+        assert_eq!(apk.binary_type(), "APK");
+        let aab = release(serde_json::json!({
+            "name": "n",
+            "binaryDownloadUri": "https://example.com/binaries/abc/app.aab"
+        }));
+        assert_eq!(aab.binary_type(), "AAB");
+        let unknown = release(serde_json::json!({ "name": "n" }));
+        assert_eq!(unknown.binary_type(), "-");
     }
 
     #[test]

@@ -31,12 +31,13 @@ pub fn list() -> Result<()> {
         println!("No releases found");
         return Ok(());
     }
-    let rows: Vec<(String, String, String, String)> = releases
+    let rows: Vec<(String, String, &str, String, String)> = releases
         .iter()
         .map(|release| {
             (
                 release.id().to_string(),
                 release.version(),
+                release.binary_type(),
                 format_time(&release.create_time),
                 summarize(release.notes(), 50),
             )
@@ -55,11 +56,13 @@ pub fn list() -> Result<()> {
         .unwrap_or(0)
         .max("VERSION".len());
     println!(
-        "{:<id_width$}  {:<version_width$}  {:<16}  {}",
-        "ID", "VERSION", "CREATED", "NOTES"
+        "{:<id_width$}  {:<version_width$}  {:<4}  {:<16}  {}",
+        "ID", "VERSION", "TYPE", "CREATED", "NOTES"
     );
-    for (id, version, created, notes) in &rows {
-        println!("{id:<id_width$}  {version:<version_width$}  {created:<16}  {notes}");
+    for (id, version, binary_type, created, notes) in &rows {
+        println!(
+            "{id:<id_width$}  {version:<version_width$}  {binary_type:<4}  {created:<16}  {notes}"
+        );
     }
     println!("\nRun `fad install <ID>` to download and install a release");
     Ok(())
