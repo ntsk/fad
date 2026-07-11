@@ -1,19 +1,27 @@
 use anyhow::{bail, Context, Result};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::io::ErrorKind;
 use std::path::PathBuf;
 
-#[derive(Deserialize)]
+#[derive(Serialize, Deserialize)]
 pub struct Config {
     pub app_id: String,
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "OauthConfig::is_empty")]
     pub oauth: OauthConfig,
 }
 
-#[derive(Deserialize, Default)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct OauthConfig {
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub client_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub client_secret: Option<String>,
+}
+
+impl OauthConfig {
+    fn is_empty(&self) -> bool {
+        self.client_id.is_none() && self.client_secret.is_none()
+    }
 }
 
 impl Config {
@@ -61,10 +69,23 @@ pub fn load() -> Result<Config> {
     match load_optional()? {
         Some(config) => Ok(config),
         None => bail!(
-            "config file not found: {}\nCreate it with:\n\n  app_id = \"1:1234567890:android:0a1b2c3d4e5f\"",
+            "config file not found: {}\nRun `fad login` to select an app, or create the file with:\n\n  app_id = \"1:1234567890:android:0a1b2c3d4e5f\"",
             config_path()?.display()
         ),
     }
+}
+
+pub fn save(config: &Config) -> Result<()> {
+    let dir = config_dir()?;
+    std::fs::create_dir_all(&dir).with_context(|| format!("failed to create {}", dir.display()))?;
+    let path = config_path()?;
+    std::fs::write(&path, to_toml(config)?)
+        .with_context(|| format!("failed to write {}", path.display()))?;
+    Ok(())
+}
+
+fn to_toml(config: &Config) -> Result<String> {
+    toml::to_string(config).context("failed to serialize the config")
 }
 
 #[cfg(test)]
@@ -92,5 +113,29 @@ mod tests {
         .unwrap();
         assert_eq!(config.oauth.client_id.as_deref(), Some("cid"));
         assert_eq!(config.oauth.client_secret.as_deref(), Some("cs"));
+    }
+
+    #[test]
+    fn serializes_config_without_empty_oauth_section() {
+        let config = Config {
+            app_id: "1:1:android:a".to_string(),
+            oauth: OauthConfig::default(),
+        };
+        assert_eq!(to_toml(&config).unwrap(), "app_id = \"1:1:android:a\"\n");
+    }
+
+    #[test]
+    fn serialized_config_preserves_oauth_overrides() {
+        let config = Config {
+            app_id: "1:1:android:a".to_string(),
+            oauth: OauthConfig {
+                client_id: Some("cid".to_string()),
+                client_secret: Some("cs".to_string()),
+            },
+        };
+        let reparsed: Config = toml::from_str(&to_toml(&config).unwrap()).unwrap();
+        assert_eq!(reparsed.app_id, "1:1:android:a");
+        assert_eq!(reparsed.oauth.client_id.as_deref(), Some("cid"));
+        assert_eq!(reparsed.oauth.client_secret.as_deref(), Some("cs"));
     }
 }
