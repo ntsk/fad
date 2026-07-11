@@ -1,3 +1,5 @@
+mod config;
+
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};
 
