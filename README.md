@@ -16,7 +16,9 @@ cargo install --path .
 
 ## 設定
 
-`~/.config/fad/config.toml` を作成します。
+`fad login` 後にアクセス可能な Firebase プロジェクトと Android アプリの一覧から対話的に選択でき、選択結果は `~/.config/fad/config.toml` に保存されます。設定がない状態で `fad install` を実行した場合も同じ選択が実行されます。
+
+手動で設定する場合は `~/.config/fad/config.toml` を作成します。
 
 ```toml
 app_id = "1:1234567890:android:0a1b2c3d4e5f"
@@ -35,10 +37,12 @@ client_secret = "..."
 ## 使い方
 
 ```
-fad login             # ブラウザで Google アカウントにログイン
+fad login             # ブラウザで Google アカウントにログインし、対象アプリを選択
 fad install --list    # インストール可能なリリースの一覧を表示
 fad install <ID>      # リリースをダウンロードしてインストール
 ```
+
+対象アプリを切り替えたいときは `fad login` を再実行するか、`config.toml` の `app_id` を書き換えてください。
 
 ## 動作の詳細
 
