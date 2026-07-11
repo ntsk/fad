@@ -1,4 +1,6 @@
+mod api;
 mod auth;
+mod commands;
 mod config;
 
 use anyhow::{bail, Result};
@@ -32,6 +34,7 @@ enum Command {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Login => auth::login(),
-        Command::Install { .. } => bail!("not implemented yet"),
+        Command::Install { id: Some(id), .. } => bail!("not implemented yet: {id}"),
+        Command::Install { .. } => commands::list(),
     }
 }
