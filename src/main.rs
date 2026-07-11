@@ -3,7 +3,7 @@ mod auth;
 mod commands;
 mod config;
 
-use anyhow::{bail, Result};
+use anyhow::Result;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
@@ -34,7 +34,7 @@ enum Command {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Login => auth::login(),
-        Command::Install { id: Some(id), .. } => bail!("not implemented yet: {id}"),
+        Command::Install { id: Some(id), .. } => commands::install(&id),
         Command::Install { .. } => commands::list(),
     }
 }

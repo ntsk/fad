@@ -1,4 +1,10 @@
-use anyhow::Result;
+use std::fs::File;
+use std::io;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+
+use anyhow::{bail, Context, Result};
+use zip::ZipArchive;
 
 use crate::api::Client;
 use crate::config;
@@ -32,6 +38,93 @@ pub fn list() -> Result<()> {
         println!("{id:<id_width$}  {version:<version_width$}  {created:<16}  {notes}");
     }
     println!("\nRun `fad install <ID>` to download and install a release");
+    Ok(())
+}
+
+pub fn install(id: &str) -> Result<()> {
+    let config = config::load()?;
+    let client = Client::new(&config)?;
+    let release_id = id.rsplit('/').next().unwrap_or(id);
+    let release = client.get_release(release_id)?;
+    println!("Installing release {} (version {})", release.id(), release.version());
+
+    let temp_dir = tempfile::tempdir().context("failed to create a temporary directory")?;
+    let download_path = temp_dir.path().join("release.bin");
+    println!("Downloading the app binary...");
+    client.download(&release, &download_path)?;
+
+    let apk_path = match detect_binary_kind(&download_path)? {
+        BinaryKind::Apk => {
+            let apk_path = temp_dir.path().join("app.apk");
+            std::fs::rename(&download_path, &apk_path)?;
+            apk_path
+        }
+        BinaryKind::Aab => {
+            let aab_path = temp_dir.path().join("app.aab");
+            std::fs::rename(&download_path, &aab_path)?;
+            build_universal_apk(temp_dir.path(), &aab_path)?
+        }
+    };
+    adb_install(&apk_path)?;
+    println!("Install complete");
+    Ok(())
+}
+
+enum BinaryKind {
+    Apk,
+    Aab,
+}
+
+fn detect_binary_kind(path: &Path) -> Result<BinaryKind> {
+    let file = File::open(path).with_context(|| format!("failed to open {}", path.display()))?;
+    let mut archive =
+        ZipArchive::new(file).context("the downloaded binary is not a valid APK/AAB")?;
+    if archive.by_name("BundleConfig.pb").is_ok() {
+        return Ok(BinaryKind::Aab);
+    }
+    if archive.by_name("AndroidManifest.xml").is_ok() {
+        return Ok(BinaryKind::Apk);
+    }
+    bail!("could not determine whether the downloaded binary is an APK or an AAB")
+}
+
+fn build_universal_apk(work_dir: &Path, aab_path: &Path) -> Result<PathBuf> {
+    println!("Building a universal APK with bundletool...");
+    let apks_path = work_dir.join("app.apks");
+    let status = Command::new("bundletool")
+        .arg("build-apks")
+        .arg(format!("--bundle={}", aab_path.display()))
+        .arg(format!("--output={}", apks_path.display()))
+        .arg("--mode=universal")
+        .status()
+        .context("failed to run bundletool; make sure it is installed and on PATH")?;
+    if !status.success() {
+        bail!("bundletool build-apks failed");
+    }
+    let apk_path = work_dir.join("universal.apk");
+    let file = File::open(&apks_path)
+        .with_context(|| format!("failed to open {}", apks_path.display()))?;
+    let mut archive = ZipArchive::new(file).context("failed to read the bundletool output")?;
+    let mut entry = archive
+        .by_name("universal.apk")
+        .context("universal.apk not found in the bundletool output")?;
+    let mut out = File::create(&apk_path)
+        .with_context(|| format!("failed to create {}", apk_path.display()))?;
+    io::copy(&mut entry, &mut out)?;
+    Ok(apk_path)
+}
+
+fn adb_install(apk_path: &Path) -> Result<()> {
+    println!("Installing with adb...");
+    let status = Command::new("adb")
+        .arg("install")
+        .arg("-r")
+        .arg(apk_path)
+        .status()
+        .context("failed to run adb; make sure it is installed and on PATH")?;
+    if !status.success() {
+        bail!("adb install failed");
+    }
     Ok(())
 }
 
