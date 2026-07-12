@@ -42,7 +42,7 @@ fad logout                # Revoke the token and delete the stored credentials
 fad projects              # List accessible Firebase projects (* marks the current target)
 fad use                   # Interactively switch the target project and app (no re-login needed)
 fad use <PROJECT_ID>      # Pick an app from the given project
-fad install --list        # List installable releases
+fad releases              # List releases of the target app
 fad install <ID>          # Download and install a release
 fad download <ID>         # Save a release binary to the current directory
 fad download <ID> -o DIR  # Save into the given directory (-o / --output)
