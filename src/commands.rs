@@ -69,8 +69,8 @@ pub fn list() -> Result<()> {
         .unwrap_or(0)
         .max("VERSION".len());
     println!(
-        "{:<id_width$}  {:<version_width$}  {:<4}  {:<16}  {}",
-        "ID", "VERSION", "TYPE", "CREATED", "NOTES"
+        "{:<id_width$}  {:<version_width$}  {:<4}  {:<16}  NOTES",
+        "ID", "VERSION", "TYPE", "CREATED"
     );
     for (id, version, binary_type, created, notes) in &rows {
         println!(
