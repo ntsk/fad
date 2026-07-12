@@ -81,7 +81,7 @@ pub fn select_app_in_project(token: &str, project_id: &str) -> Result<()> {
     choose_and_save_app(&http, token, project_id)
 }
 
-pub fn save_app_id(app_id: &str) -> Result<()> {
+fn save_app_id(app_id: &str) -> Result<()> {
     let oauth = config::load_optional()?
         .map(|c| c.oauth)
         .unwrap_or_default();

@@ -23,10 +23,10 @@ enum Command {
     #[command(about = "Set the target Firebase project and app")]
     Use {
         #[arg(
-            value_name = "PROJECT_OR_APP_ID",
-            help = "Project ID or app ID to switch to (interactive when omitted)"
+            value_name = "PROJECT_ID",
+            help = "Project ID to pick an app from (interactive when omitted)"
         )]
-        target: Option<String>,
+        project_id: Option<String>,
     },
     #[command(about = "List releases or download and install one")]
     Install {
@@ -58,7 +58,7 @@ fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Login => auth::login(),
         Command::Projects => commands::projects(),
-        Command::Use { target } => commands::use_target(target.as_deref()),
+        Command::Use { project_id } => commands::use_target(project_id.as_deref()),
         Command::Install { id: Some(id), .. } => commands::install(&id),
         Command::Install { .. } => commands::list(),
         Command::Download { id, output } => commands::download(&id, output),
