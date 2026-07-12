@@ -1,3 +1,4 @@
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -86,6 +87,10 @@ pub fn install(id: &str) -> Result<()> {
     let client = Client::new(&config)?;
     let release_id = id.rsplit('/').next().unwrap_or(id);
     let release = client.get_release(release_id)?;
+    require_tool("adb")?;
+    if release.binary_type() == "AAB" {
+        require_tool("bundletool")?;
+    }
     println!(
         "Installing release {} (version {})",
         release.id(),
@@ -223,6 +228,33 @@ fn build_universal_apk(work_dir: &Path, aab_path: &Path) -> Result<PathBuf> {
     Ok(apk_path)
 }
 
+fn require_tool(name: &str) -> Result<()> {
+    let found = std::env::var_os("PATH")
+        .map(|paths| find_in_paths(&paths, name))
+        .unwrap_or(false);
+    if !found {
+        bail!("{name} not found on PATH; make sure it is installed");
+    }
+    Ok(())
+}
+
+fn find_in_paths(paths: &OsStr, name: &str) -> bool {
+    std::env::split_paths(paths).any(|dir| is_executable(&dir.join(name)))
+}
+
+#[cfg(unix)]
+fn is_executable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(path)
+        .map(|meta| meta.is_file() && meta.permissions().mode() & 0o111 != 0)
+        .unwrap_or(false)
+}
+
+#[cfg(not(unix))]
+fn is_executable(path: &Path) -> bool {
+    path.is_file() || path.with_extension("exe").is_file()
+}
+
 fn adb_install(apk_path: &Path) -> Result<()> {
     println!("Installing with adb...");
     let status = Command::new("adb")
@@ -294,6 +326,33 @@ mod tests {
         let path = dir.path().join("app.bin");
         write_zip(&path, "something-else.txt");
         assert!(detect_binary_kind(&path).is_err());
+    }
+
+    #[test]
+    fn finds_executables_in_path_dirs() {
+        let dir = tempfile::tempdir().unwrap();
+        let tool = dir.path().join("sometool");
+        std::fs::write(&tool, "").unwrap();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let paths = std::env::join_paths([dir.path()]).unwrap();
+        assert!(find_in_paths(&paths, "sometool"));
+        assert!(!find_in_paths(&paths, "othertool"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn ignores_non_executable_files() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let tool = dir.path().join("sometool");
+        std::fs::write(&tool, "").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o644)).unwrap();
+        let paths = std::env::join_paths([dir.path()]).unwrap();
+        assert!(!find_in_paths(&paths, "sometool"));
     }
 
     #[test]
