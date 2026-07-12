@@ -1,7 +1,8 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use dialoguer::theme::ColorfulTheme;
 use dialoguer::Select;
 use serde::Deserialize;
+use std::io::IsTerminal;
 
 use crate::api;
 use crate::config;
@@ -46,6 +47,7 @@ struct AndroidApp {
 }
 
 pub fn select_and_save(token: &str) -> Result<()> {
+    require_terminal()?;
     let http = reqwest::blocking::Client::new();
     let mut projects = list_projects(&http, token)?;
     if projects.is_empty() {
@@ -77,8 +79,19 @@ pub fn select_and_save(token: &str) -> Result<()> {
 }
 
 pub fn select_app_in_project(token: &str, project_id: &str) -> Result<()> {
+    require_terminal()?;
     let http = reqwest::blocking::Client::new();
     choose_and_save_app(&http, token, project_id)
+}
+
+fn require_terminal() -> Result<()> {
+    if std::io::stdin().is_terminal() && std::io::stderr().is_terminal() {
+        return Ok(());
+    }
+    bail!(
+        "interactive selection requires a terminal; set app_id in {} manually",
+        config::config_path()?.display()
+    );
 }
 
 fn save_app_id(app_id: &str) -> Result<()> {

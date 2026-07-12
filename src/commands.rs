@@ -83,9 +83,9 @@ pub fn list() -> Result<()> {
 }
 
 pub fn install(id: &str) -> Result<()> {
+    let release_id = normalize_release_id(id)?;
     let config = load_or_select_config()?;
     let client = Client::new(&config)?;
-    let release_id = id.rsplit('/').next().unwrap_or(id);
     let release = client.get_release(release_id)?;
     require_tool("adb")?;
     if release.binary_type() == "AAB" {
@@ -105,12 +105,14 @@ pub fn install(id: &str) -> Result<()> {
     let apk_path = match detect_binary_kind(&download_path)? {
         BinaryKind::Apk => {
             let apk_path = temp_dir.path().join("app.apk");
-            std::fs::rename(&download_path, &apk_path)?;
+            std::fs::rename(&download_path, &apk_path)
+                .context("failed to move the downloaded file")?;
             apk_path
         }
         BinaryKind::Aab => {
             let aab_path = temp_dir.path().join("app.aab");
-            std::fs::rename(&download_path, &aab_path)?;
+            std::fs::rename(&download_path, &aab_path)
+                .context("failed to move the downloaded file")?;
             build_universal_apk(temp_dir.path(), &aab_path)?
         }
     };
@@ -120,9 +122,9 @@ pub fn install(id: &str) -> Result<()> {
 }
 
 pub fn download(id: &str, output: Option<PathBuf>) -> Result<()> {
+    let release_id = normalize_release_id(id)?;
     let config = load_or_select_config()?;
     let client = Client::new(&config)?;
-    let release_id = id.rsplit('/').next().unwrap_or(id);
     let release = client.get_release(release_id)?;
     println!(
         "Downloading release {} (version {})",
@@ -158,6 +160,18 @@ pub fn download(id: &str, output: Option<PathBuf>) -> Result<()> {
     }
     println!("Saved to {}", dest.display());
     Ok(())
+}
+
+fn normalize_release_id(id: &str) -> Result<&str> {
+    let release_id = id.rsplit('/').next().unwrap_or(id).trim();
+    if release_id.is_empty()
+        || !release_id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_'))
+    {
+        bail!("invalid release ID: \"{id}\" (run `fad releases` to see available IDs)");
+    }
+    Ok(release_id)
 }
 
 fn download_file_name(release: &Release, extension: &str) -> String {
@@ -353,6 +367,23 @@ mod tests {
         std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o644)).unwrap();
         let paths = std::env::join_paths([dir.path()]).unwrap();
         assert!(!find_in_paths(&paths, "sometool"));
+    }
+
+    #[test]
+    fn normalizes_release_id_from_bare_id_and_resource_name() {
+        assert_eq!(normalize_release_id("abc123").unwrap(), "abc123");
+        assert_eq!(
+            normalize_release_id("projects/1/apps/1:1:android:a/releases/r1").unwrap(),
+            "r1"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_release_ids() {
+        assert!(normalize_release_id("").is_err());
+        assert!(normalize_release_id("releases/").is_err());
+        assert!(normalize_release_id("id with spaces").is_err());
+        assert!(normalize_release_id("id?query").is_err());
     }
 
     #[test]
