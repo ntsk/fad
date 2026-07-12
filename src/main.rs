@@ -30,6 +30,18 @@ enum Command {
         #[arg(long, help = "List installable releases")]
         list: bool,
     },
+    #[command(about = "Download a release binary without installing")]
+    Download {
+        #[arg(value_name = "ID", help = "Release ID to download")]
+        id: String,
+        #[arg(
+            short,
+            long,
+            value_name = "DIR",
+            help = "Directory to save the binary into (defaults to the current directory)"
+        )]
+        output: Option<std::path::PathBuf>,
+    },
 }
 
 fn main() -> Result<()> {
@@ -37,5 +49,6 @@ fn main() -> Result<()> {
         Command::Login => auth::login(),
         Command::Install { id: Some(id), .. } => commands::install(&id),
         Command::Install { .. } => commands::list(),
+        Command::Download { id, output } => commands::download(&id, output),
     }
 }

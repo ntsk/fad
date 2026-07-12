@@ -6,7 +6,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use zip::ZipArchive;
 
-use crate::api::Client;
+use crate::api::{Client, Release};
 use crate::apps;
 use crate::auth;
 use crate::config;
@@ -99,6 +99,71 @@ pub fn install(id: &str) -> Result<()> {
     adb_install(&apk_path)?;
     println!("Install complete");
     Ok(())
+}
+
+pub fn download(id: &str, output: Option<PathBuf>) -> Result<()> {
+    let config = load_or_select_config()?;
+    let client = Client::new(&config)?;
+    let release_id = id.rsplit('/').next().unwrap_or(id);
+    let release = client.get_release(release_id)?;
+    println!(
+        "Downloading release {} (version {})",
+        release.id(),
+        release.version()
+    );
+
+    let dir = output.unwrap_or_else(|| PathBuf::from("."));
+    std::fs::create_dir_all(&dir)
+        .with_context(|| format!("failed to create directory {}", dir.display()))?;
+    let temp = tempfile::Builder::new()
+        .prefix(".fad-download-")
+        .tempfile_in(&dir)
+        .with_context(|| format!("failed to create a temporary file in {}", dir.display()))?;
+    client.download(&release, temp.path())?;
+
+    let extension = match detect_binary_kind(temp.path()) {
+        Ok(BinaryKind::Apk) => "apk",
+        Ok(BinaryKind::Aab) => "aab",
+        Err(_) => match release.binary_type() {
+            "APK" => "apk",
+            "AAB" => "aab",
+            _ => "bin",
+        },
+    };
+    let dest = dir.join(download_file_name(&release, extension));
+    temp.persist(&dest)
+        .with_context(|| format!("failed to save {}", dest.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&dest, std::fs::Permissions::from_mode(0o644))?;
+    }
+    println!("Saved to {}", dest.display());
+    Ok(())
+}
+
+fn download_file_name(release: &Release, extension: &str) -> String {
+    let mut parts: Vec<String> = Vec::new();
+    if !release.display_version.is_empty() {
+        parts.push(sanitize_file_part(&release.display_version));
+    }
+    if !release.build_version.is_empty() {
+        parts.push(sanitize_file_part(&release.build_version));
+    }
+    parts.push(sanitize_file_part(release.id()));
+    format!("{}.{extension}", parts.join("-"))
+}
+
+fn sanitize_file_part(part: &str) -> String {
+    part.chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | '_') {
+                c
+            } else {
+                '_'
+            }
+        })
+        .collect()
 }
 
 enum BinaryKind {
@@ -216,6 +281,36 @@ mod tests {
         let path = dir.path().join("app.bin");
         write_zip(&path, "something-else.txt");
         assert!(detect_binary_kind(&path).is_err());
+    }
+
+    #[test]
+    fn builds_download_file_name_from_release() {
+        let release: Release = serde_json::from_value(serde_json::json!({
+            "name": "projects/1/apps/a/releases/r1",
+            "displayVersion": "9.0.0",
+            "buildVersion": "10090000"
+        }))
+        .unwrap();
+        assert_eq!(download_file_name(&release, "apk"), "9.0.0-10090000-r1.apk");
+    }
+
+    #[test]
+    fn download_file_name_falls_back_to_release_id() {
+        let release: Release = serde_json::from_value(serde_json::json!({
+            "name": "projects/1/apps/a/releases/r1"
+        }))
+        .unwrap();
+        assert_eq!(download_file_name(&release, "aab"), "r1.aab");
+    }
+
+    #[test]
+    fn sanitizes_unsafe_characters_in_file_name() {
+        let release: Release = serde_json::from_value(serde_json::json!({
+            "name": "projects/1/apps/a/releases/r1",
+            "displayVersion": "1.0 beta/2"
+        }))
+        .unwrap();
+        assert_eq!(download_file_name(&release, "apk"), "1.0_beta_2-r1.apk");
     }
 
     #[test]
