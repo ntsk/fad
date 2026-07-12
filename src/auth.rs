@@ -5,10 +5,10 @@ use rand::distributions::Alphanumeric;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use url::Url;
 
 use crate::apps;
@@ -22,6 +22,7 @@ const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
 const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
 const SCOPES: &str =
     "openid email https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/firebase";
+const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Serialize, Deserialize)]
 struct Credentials {
@@ -67,7 +68,7 @@ pub fn login() -> Result<()> {
     let _ = open::that(auth_url.as_str());
     println!("Waiting for the authorization response on {redirect_uri} ...");
 
-    let code = wait_for_code(&listener, &state)?;
+    let code = wait_for_code(&listener, &state, LOGIN_TIMEOUT)?;
 
     let http = reqwest::blocking::Client::new();
     let resp = http
@@ -193,46 +194,67 @@ fn bind_listener() -> Result<TcpListener> {
     }
 }
 
-fn wait_for_code(listener: &TcpListener, expected_state: &str) -> Result<String> {
-    for stream in listener.incoming() {
-        let mut stream = match stream {
-            Ok(stream) => stream,
-            Err(_) => continue,
-        };
-        let Some(path) = read_request_path(&mut stream) else {
-            respond(&mut stream, "400 Bad Request", "Bad request");
-            continue;
-        };
-        let Ok(url) = Url::parse(&format!("http://localhost{path}")) else {
-            respond(&mut stream, "400 Bad Request", "Bad request");
-            continue;
-        };
-        let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
-        if let Some(error) = params.get("error") {
-            respond(
-                &mut stream,
-                "200 OK",
-                "Login failed. You can close this tab.",
-            );
-            bail!("authorization was denied: {error}");
+fn wait_for_code(
+    listener: &TcpListener,
+    expected_state: &str,
+    timeout: Duration,
+) -> Result<String> {
+    listener
+        .set_nonblocking(true)
+        .context("failed to configure the local listener")?;
+    let deadline = Instant::now() + timeout;
+    loop {
+        if Instant::now() >= deadline {
+            bail!("timed out waiting for the authorization response; run `fad login` again");
         }
-        match (params.get("code"), params.get("state")) {
-            (Some(code), Some(state)) if state == expected_state => {
-                respond(
-                    &mut stream,
-                    "200 OK",
-                    "Login successful. You can close this tab and return to the terminal.",
-                );
-                return Ok(code.clone());
+        match listener.accept() {
+            Ok((mut stream, _)) => {
+                let _ = stream.set_nonblocking(false);
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(10)));
+                if let Some(code) = handle_connection(&mut stream, expected_state)? {
+                    return Ok(code);
+                }
             }
-            (Some(_), Some(_)) => {
-                respond(&mut stream, "400 Bad Request", "State mismatch");
-                bail!("state parameter mismatch; try `fad login` again");
+            Err(err) if err.kind() == ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(50));
             }
-            _ => respond(&mut stream, "404 Not Found", "Not found"),
+            Err(_) => std::thread::sleep(Duration::from_millis(50)),
         }
     }
-    bail!("the local listener was closed unexpectedly")
+}
+
+fn handle_connection(stream: &mut TcpStream, expected_state: &str) -> Result<Option<String>> {
+    let Some(path) = read_request_path(stream) else {
+        respond(stream, "400 Bad Request", "Bad request");
+        return Ok(None);
+    };
+    let Ok(url) = Url::parse(&format!("http://localhost{path}")) else {
+        respond(stream, "400 Bad Request", "Bad request");
+        return Ok(None);
+    };
+    let params: HashMap<String, String> = url.query_pairs().into_owned().collect();
+    if let Some(error) = params.get("error") {
+        respond(stream, "200 OK", "Login failed. You can close this tab.");
+        bail!("authorization was denied: {error}");
+    }
+    match (params.get("code"), params.get("state")) {
+        (Some(code), Some(state)) if state == expected_state => {
+            respond(
+                stream,
+                "200 OK",
+                "Login successful. You can close this tab and return to the terminal.",
+            );
+            Ok(Some(code.clone()))
+        }
+        (Some(_), Some(_)) => {
+            respond(stream, "400 Bad Request", "State mismatch");
+            bail!("state parameter mismatch; try `fad login` again");
+        }
+        _ => {
+            respond(stream, "404 Not Found", "Not found");
+            Ok(None)
+        }
+    }
 }
 
 fn read_request_path(stream: &mut TcpStream) -> Option<String> {
@@ -298,4 +320,114 @@ fn email_from_id_token(token: &str) -> Option<String> {
     let bytes = URL_SAFE_NO_PAD.decode(payload).ok()?;
     let claims: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
     claims.get("email")?.as_str().map(str::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+    use std::net::TcpStream as ClientStream;
+    use std::thread;
+
+    fn request(addr: std::net::SocketAddr, path: &str) -> String {
+        let mut stream = ClientStream::connect(addr).unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        stream
+            .write_all(format!("GET {path} HTTP/1.1\r\nHost: localhost\r\n\r\n").as_bytes())
+            .unwrap();
+        let mut response = String::new();
+        let _ = stream.read_to_string(&mut response);
+        response
+    }
+
+    fn send_request(addr: std::net::SocketAddr, path: &str) -> thread::JoinHandle<String> {
+        let path = path.to_string();
+        thread::spawn(move || request(addr, &path))
+    }
+
+    #[test]
+    fn wait_for_code_accepts_matching_state() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = send_request(addr, "/?code=abc123&state=st1");
+
+        let code = wait_for_code(&listener, "st1", Duration::from_secs(5)).unwrap();
+
+        assert_eq!(code, "abc123");
+        assert!(client.join().unwrap().contains("200 OK"));
+    }
+
+    #[test]
+    fn wait_for_code_ignores_unrelated_requests() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = thread::spawn(move || {
+            let favicon = request(addr, "/favicon.ico");
+            let callback = request(addr, "/?code=abc123&state=st1");
+            (favicon, callback)
+        });
+
+        let code = wait_for_code(&listener, "st1", Duration::from_secs(5)).unwrap();
+
+        assert_eq!(code, "abc123");
+        let (favicon, callback) = client.join().unwrap();
+        assert!(favicon.contains("404 Not Found"));
+        assert!(callback.contains("200 OK"));
+    }
+
+    #[test]
+    fn wait_for_code_rejects_state_mismatch() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = send_request(addr, "/?code=abc123&state=wrong");
+
+        let err = wait_for_code(&listener, "st1", Duration::from_secs(5)).unwrap_err();
+
+        assert!(err.to_string().contains("state parameter mismatch"));
+        assert!(client.join().unwrap().contains("400 Bad Request"));
+    }
+
+    #[test]
+    fn wait_for_code_reports_denied_authorization() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let addr = listener.local_addr().unwrap();
+        let client = send_request(addr, "/?error=access_denied");
+
+        let err = wait_for_code(&listener, "st1", Duration::from_secs(5)).unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("authorization was denied: access_denied"));
+        client.join().unwrap();
+    }
+
+    #[test]
+    fn wait_for_code_times_out_without_response() {
+        let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+
+        let err = wait_for_code(&listener, "st1", Duration::from_millis(150)).unwrap_err();
+
+        assert!(err.to_string().contains("timed out"));
+    }
+
+    #[test]
+    fn extracts_email_from_id_token_payload() {
+        let payload = URL_SAFE_NO_PAD.encode(r#"{"email":"user@example.com"}"#);
+        let token = format!("header.{payload}.signature");
+
+        assert_eq!(
+            email_from_id_token(&token).as_deref(),
+            Some("user@example.com")
+        );
+    }
+
+    #[test]
+    fn returns_none_for_malformed_id_token() {
+        assert_eq!(email_from_id_token("not-a-jwt"), None);
+        assert_eq!(email_from_id_token("a.!!!.c"), None);
+        let payload = URL_SAFE_NO_PAD.encode(r#"{"sub":"123"}"#);
+        assert_eq!(email_from_id_token(&format!("a.{payload}.c")), None);
+    }
 }
