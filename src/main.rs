@@ -30,6 +30,8 @@ enum Command {
         #[arg(long, help = "List installable releases")]
         list: bool,
     },
+    #[command(about = "Select the target Firebase project and app")]
+    Select,
     #[command(about = "Download a release binary without installing")]
     Download {
         #[arg(value_name = "ID", help = "Release ID to download")]
@@ -49,6 +51,7 @@ fn main() -> Result<()> {
         Command::Login => auth::login(),
         Command::Install { id: Some(id), .. } => commands::install(&id),
         Command::Install { .. } => commands::list(),
+        Command::Select => commands::select(),
         Command::Download { id, output } => commands::download(&id, output),
     }
 }

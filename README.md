@@ -38,6 +38,7 @@ client_secret = "..."
 
 ```
 fad login                 # ブラウザで Google アカウントにログインし、対象アプリを選択
+fad select                # 対象のプロジェクトとアプリを選び直す（再ログイン不要）
 fad install --list        # インストール可能なリリースの一覧を表示
 fad install <ID>          # リリースをダウンロードしてインストール
 fad download <ID>         # リリースのバイナリをカレントディレクトリに保存
@@ -46,7 +47,7 @@ fad download <ID> -o DIR  # 保存先ディレクトリを指定 (-o / --output)
 
 `download` は APK / AAB をそのまま `{バージョン}-{ビルド番号}-{リリースID}.{apk,aab}` という名前で保存します。
 
-対象アプリを切り替えたいときは `fad login` を再実行するか、`config.toml` の `app_id` を書き換えてください。
+対象アプリを切り替えたいときは `fad select` を実行するか、`config.toml` の `app_id` を書き換えてください。
 
 ## 動作の詳細
 

@@ -23,6 +23,11 @@ fn load_or_select_config() -> Result<Config> {
     }
 }
 
+pub fn select() -> Result<()> {
+    let token = auth::get_access_token()?;
+    apps::select_and_save(&token)
+}
+
 pub fn list() -> Result<()> {
     let config = load_or_select_config()?;
     let client = Client::new(&config)?;
