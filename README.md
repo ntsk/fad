@@ -57,3 +57,13 @@ To switch the target app, run `fad use` or edit `app_id` in `config.toml`.
 - `fad login` performs OpenID Connect (OAuth 2.0) authentication in the browser and stores tokens in `~/.config/fad/credentials.json`
 - APK releases are installed directly with `adb install -r`
 - AAB releases are converted to a universal APK with `bundletool build-apks --mode=universal` before installing (signed with the default debug keystore at `~/.android/debug.keystore`)
+
+## Disclaimer
+
+This is not an official Google or Firebase product. It is an unofficial tool that uses the Firebase App Distribution and Firebase Management REST APIs.
+
+By default it authenticates with the public OAuth client that the Firebase CLI ships with, so signing in looks like signing in to the Firebase CLI. If you prefer, register your own OAuth client (desktop app type) and set it in the `[oauth]` section of the config file.
+
+## License
+
+Licensed under the [MIT License](LICENSE).
