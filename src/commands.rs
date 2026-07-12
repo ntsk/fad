@@ -77,7 +77,7 @@ pub fn list() -> Result<()> {
             "{id:<id_width$}  {version:<version_width$}  {binary_type:<4}  {created:<16}  {notes}"
         );
     }
-    println!("\nRun `fad install <ID>` to download and install a release");
+    println!("\nRun `fad install <ID>` to install or `fad download <ID>` to save a release");
     Ok(())
 }
 

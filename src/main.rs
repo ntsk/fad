@@ -30,17 +30,12 @@ enum Command {
         )]
         project_id: Option<String>,
     },
-    #[command(about = "List releases or download and install one")]
+    #[command(about = "List releases of the target app")]
+    Releases,
+    #[command(about = "Download and install a release")]
     Install {
-        #[arg(
-            value_name = "ID",
-            required_unless_present = "list",
-            conflicts_with = "list",
-            help = "Release ID to install"
-        )]
-        id: Option<String>,
-        #[arg(long, help = "List installable releases")]
-        list: bool,
+        #[arg(value_name = "ID", help = "Release ID to install")]
+        id: String,
     },
     #[command(about = "Download a release binary without installing")]
     Download {
@@ -62,8 +57,8 @@ fn main() -> Result<()> {
         Command::Logout => auth::logout(),
         Command::Projects => commands::projects(),
         Command::Use { project_id } => commands::use_target(project_id.as_deref()),
-        Command::Install { id: Some(id), .. } => commands::install(&id),
-        Command::Install { .. } => commands::list(),
+        Command::Releases => commands::list(),
+        Command::Install { id } => commands::install(&id),
         Command::Download { id, output } => commands::download(&id, output),
     }
 }

@@ -130,9 +130,7 @@ impl Client {
             .send()
             .context("failed to reach the App Distribution API")?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND {
-            bail!(
-                "release not found: {release_id} (run `fad install --list` to see available IDs)"
-            );
+            bail!("release not found: {release_id} (run `fad releases` to see available IDs)");
         }
         let resp = check(resp)?;
         resp.json().context("failed to parse the release")
