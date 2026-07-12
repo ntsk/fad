@@ -9,6 +9,9 @@ readme = "README.md"
 keywords = ["firebase", "app-distribution", "android", "cli", "apk"]
 categories = ["command-line-utilities", "development-tools"]
 
+[dev-dependencies]
+mockito = "1"
+
 [dependencies]
 anyhow = "1"
 base64 = "0.22"

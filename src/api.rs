@@ -10,7 +10,7 @@ use crate::config::Config;
 
 const BASE_URL: &str = "https://firebaseappdistribution.googleapis.com/v1";
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Release {
     pub name: String,
@@ -26,7 +26,7 @@ pub struct Release {
     pub release_notes: Option<ReleaseNotes>,
 }
 
-#[derive(Deserialize)]
+#[derive(Debug, Deserialize)]
 pub struct ReleaseNotes {
     #[serde(default)]
     pub text: String,
@@ -37,6 +37,8 @@ pub struct ReleaseNotes {
 struct ListReleasesResponse {
     #[serde(default)]
     releases: Vec<Release>,
+    #[serde(default)]
+    next_page_token: Option<String>,
 }
 
 impl Release {
@@ -83,6 +85,7 @@ impl Release {
 pub struct Client {
     http: reqwest::blocking::Client,
     token: String,
+    base_url: String,
     project_number: String,
     app_id: String,
 }
@@ -90,6 +93,10 @@ pub struct Client {
 impl Client {
     pub fn new(config: &Config) -> Result<Self> {
         let token = auth::get_access_token()?;
+        Self::with_token(config, token, BASE_URL.to_string())
+    }
+
+    fn with_token(config: &Config, token: String, base_url: String) -> Result<Self> {
         let http = reqwest::blocking::Client::builder()
             .timeout(None)
             .connect_timeout(std::time::Duration::from_secs(10))
@@ -98,6 +105,7 @@ impl Client {
         Ok(Self {
             http,
             token,
+            base_url,
             project_number: config.project_number()?,
             app_id: config.app_id.clone(),
         })
@@ -105,21 +113,36 @@ impl Client {
 
     fn releases_url(&self) -> String {
         format!(
-            "{BASE_URL}/projects/{}/apps/{}/releases",
-            self.project_number, self.app_id
+            "{}/projects/{}/apps/{}/releases",
+            self.base_url, self.project_number, self.app_id
         )
     }
 
     pub fn list_releases(&self) -> Result<Vec<Release>> {
-        let resp = self
-            .http
-            .get(format!("{}?pageSize=100", self.releases_url()))
-            .bearer_auth(&self.token)
-            .send()
-            .context("failed to reach the App Distribution API")?;
-        let resp = check(resp)?;
-        let list: ListReleasesResponse = resp.json().context("failed to parse the release list")?;
-        Ok(list.releases)
+        let mut releases = Vec::new();
+        let mut page_token = String::new();
+        loop {
+            let mut request = self
+                .http
+                .get(self.releases_url())
+                .query(&[("pageSize", "100")])
+                .bearer_auth(&self.token);
+            if !page_token.is_empty() {
+                request = request.query(&[("pageToken", page_token.as_str())]);
+            }
+            let resp = request
+                .send()
+                .context("failed to reach the App Distribution API")?;
+            let resp = check(resp)?;
+            let list: ListReleasesResponse =
+                resp.json().context("failed to parse the release list")?;
+            releases.extend(list.releases);
+            match list.next_page_token {
+                Some(next) if !next.is_empty() => page_token = next,
+                _ => break,
+            }
+        }
+        Ok(releases)
     }
 
     pub fn get_release(&self, release_id: &str) -> Result<Release> {
@@ -146,7 +169,8 @@ impl Client {
             .send()
             .context("failed to start the binary download")?;
         let resp = check(resp)?;
-        let progress = match resp.content_length() {
+        let expected = resp.content_length();
+        let progress = match expected {
             Some(total) => ProgressBar::new(total).with_style(
                 ProgressStyle::with_template(
                     "{bar:40} {bytes}/{total_bytes} ({bytes_per_sec}, {eta})",
@@ -158,8 +182,13 @@ impl Client {
         let mut reader = progress.wrap_read(resp);
         let mut file =
             File::create(dest).with_context(|| format!("failed to create {}", dest.display()))?;
-        std::io::copy(&mut reader, &mut file).context("download failed")?;
+        let written = std::io::copy(&mut reader, &mut file).context("download failed")?;
         progress.finish_and_clear();
+        if let Some(expected) = expected {
+            if written != expected {
+                bail!("download was truncated ({written} of {expected} bytes)");
+            }
+        }
         Ok(())
     }
 }
@@ -173,10 +202,13 @@ pub(crate) fn check(resp: reqwest::blocking::Response) -> Result<reqwest::blocki
         bail!("authentication failed; run `fad login` again");
     }
     let body = resp.text().unwrap_or_default();
-    bail!(
-        "App Distribution API error ({status}): {}",
-        api_error_message(&body)
-    );
+    let message = api_error_message(&body);
+    if status == reqwest::StatusCode::FORBIDDEN {
+        bail!(
+            "permission denied ({status}): {message}\nCheck that your account has access to the selected project and app"
+        );
+    }
+    bail!("API error ({status}): {message}");
 }
 
 fn api_error_message(body: &str) -> String {
@@ -189,9 +221,136 @@ fn api_error_message(body: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mockito::Matcher;
 
     fn release(value: serde_json::Value) -> Release {
         serde_json::from_value(value).unwrap()
+    }
+
+    fn test_client(server: &mockito::ServerGuard) -> Client {
+        let config: Config = toml::from_str("app_id = \"1:1:android:a\"").unwrap();
+        Client::with_token(&config, "test-token".to_string(), server.url()).unwrap()
+    }
+
+    #[test]
+    fn list_releases_follows_pagination() {
+        let mut server = mockito::Server::new();
+        let page1 = server
+            .mock("GET", "/projects/1/apps/1:1:android:a/releases")
+            .match_query(Matcher::UrlEncoded("pageSize".into(), "100".into()))
+            .match_header("authorization", "Bearer test-token")
+            .with_body(
+                r#"{"releases":[{"name":"projects/1/apps/a/releases/r1"}],"nextPageToken":"t2"}"#,
+            )
+            .create();
+        let page2 = server
+            .mock("GET", "/projects/1/apps/1:1:android:a/releases")
+            .match_query(Matcher::AllOf(vec![
+                Matcher::UrlEncoded("pageSize".into(), "100".into()),
+                Matcher::UrlEncoded("pageToken".into(), "t2".into()),
+            ]))
+            .with_body(r#"{"releases":[{"name":"projects/1/apps/a/releases/r2"}]}"#)
+            .create();
+
+        let releases = test_client(&server).list_releases().unwrap();
+
+        let ids: Vec<&str> = releases.iter().map(|r| r.id()).collect();
+        assert_eq!(ids, ["r1", "r2"]);
+        page1.assert();
+        page2.assert();
+    }
+
+    #[test]
+    fn get_release_maps_not_found_to_helpful_error() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/projects/1/apps/1:1:android:a/releases/xyz")
+            .with_status(404)
+            .create();
+
+        let err = test_client(&server).get_release("xyz").unwrap_err();
+
+        assert!(err.to_string().contains("release not found: xyz"));
+        assert!(err.to_string().contains("fad releases"));
+    }
+
+    #[test]
+    fn unauthorized_suggests_logging_in_again() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/projects/1/apps/1:1:android:a/releases")
+            .match_query(Matcher::Any)
+            .with_status(401)
+            .create();
+
+        let err = test_client(&server).list_releases().unwrap_err();
+
+        assert!(err.to_string().contains("fad login"));
+    }
+
+    #[test]
+    fn forbidden_includes_permission_hint() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/projects/1/apps/1:1:android:a/releases")
+            .match_query(Matcher::Any)
+            .with_status(403)
+            .with_body(r#"{"error":{"message":"The caller does not have permission"}}"#)
+            .create();
+
+        let err = test_client(&server).list_releases().unwrap_err();
+
+        let message = err.to_string();
+        assert!(message.contains("permission denied"));
+        assert!(message.contains("The caller does not have permission"));
+    }
+
+    #[test]
+    fn server_error_extracts_api_message() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/projects/1/apps/1:1:android:a/releases")
+            .match_query(Matcher::Any)
+            .with_status(500)
+            .with_body(r#"{"error":{"message":"boom"}}"#)
+            .create();
+
+        let err = test_client(&server).list_releases().unwrap_err();
+
+        assert!(err.to_string().contains("API error (500"));
+        assert!(err.to_string().contains("boom"));
+    }
+
+    #[test]
+    fn download_writes_binary_to_dest() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("GET", "/binaries/app.apk")
+            .with_body("binary-content")
+            .create();
+        let release = release(serde_json::json!({
+            "name": "projects/1/apps/a/releases/r1",
+            "binaryDownloadUri": format!("{}/binaries/app.apk", server.url())
+        }));
+        let dir = tempfile::tempdir().unwrap();
+        let dest = dir.path().join("out.bin");
+
+        test_client(&server).download(&release, &dest).unwrap();
+
+        assert_eq!(std::fs::read_to_string(&dest).unwrap(), "binary-content");
+    }
+
+    #[test]
+    fn download_without_uri_fails_early() {
+        let server = mockito::Server::new();
+        let release = release(serde_json::json!({ "name": "projects/1/apps/a/releases/r1" }));
+        let dir = tempfile::tempdir().unwrap();
+
+        let err = test_client(&server)
+            .download(&release, &dir.path().join("out.bin"))
+            .unwrap_err();
+
+        assert!(err.to_string().contains("no binary download URI"));
     }
 
     #[test]
