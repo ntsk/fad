@@ -38,6 +38,7 @@ client_secret = "..."
 
 ```
 fad login                 # ブラウザで Google アカウントにログインし、対象アプリを選択
+fad logout                # トークンを失効させて保存済みの認証情報を削除
 fad projects              # アクセス可能な Firebase プロジェクトの一覧を表示（* が現在の対象）
 fad use                   # 対象のプロジェクトとアプリを対話的に選び直す（再ログイン不要）
 fad use <PROJECT_ID>      # プロジェクトを指定して、その中のアプリを選択
