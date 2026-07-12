@@ -23,9 +23,23 @@ fn load_or_select_config() -> Result<Config> {
     }
 }
 
-pub fn select() -> Result<()> {
+pub fn projects() -> Result<()> {
     let token = auth::get_access_token()?;
-    apps::select_and_save(&token)
+    apps::print_projects(&token)
+}
+
+pub fn use_target(target: Option<&str>) -> Result<()> {
+    match target {
+        Some(target) if target.contains(':') => apps::save_app_id(target),
+        None => {
+            let token = auth::get_access_token()?;
+            apps::select_and_save(&token)
+        }
+        Some(project_id) => {
+            let token = auth::get_access_token()?;
+            apps::select_app_in_project(&token, project_id)
+        }
+    }
 }
 
 pub fn list() -> Result<()> {

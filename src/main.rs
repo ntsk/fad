@@ -18,6 +18,16 @@ struct Cli {
 enum Command {
     #[command(about = "Log in to Firebase with your Google account")]
     Login,
+    #[command(about = "List accessible Firebase projects")]
+    Projects,
+    #[command(about = "Set the target Firebase project and app")]
+    Use {
+        #[arg(
+            value_name = "PROJECT_OR_APP_ID",
+            help = "Project ID or app ID to switch to (interactive when omitted)"
+        )]
+        target: Option<String>,
+    },
     #[command(about = "List releases or download and install one")]
     Install {
         #[arg(
@@ -30,8 +40,6 @@ enum Command {
         #[arg(long, help = "List installable releases")]
         list: bool,
     },
-    #[command(about = "Select the target Firebase project and app")]
-    Select,
     #[command(about = "Download a release binary without installing")]
     Download {
         #[arg(value_name = "ID", help = "Release ID to download")]
@@ -49,9 +57,10 @@ enum Command {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Login => auth::login(),
+        Command::Projects => commands::projects(),
+        Command::Use { target } => commands::use_target(target.as_deref()),
         Command::Install { id: Some(id), .. } => commands::install(&id),
         Command::Install { .. } => commands::list(),
-        Command::Select => commands::select(),
         Command::Download { id, output } => commands::download(&id, output),
     }
 }
