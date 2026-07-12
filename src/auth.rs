@@ -19,6 +19,7 @@ const DEFAULT_CLIENT_ID: &str =
 const DEFAULT_CLIENT_SECRET: &str = "j9iVZfS8kkCEFUPaAeJV0sAi";
 const AUTH_URL: &str = "https://accounts.google.com/o/oauth2/auth";
 const TOKEN_URL: &str = "https://oauth2.googleapis.com/token";
+const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
 const SCOPES: &str =
     "openid email https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/firebase";
 
@@ -110,6 +111,32 @@ pub fn login() -> Result<()> {
         );
     }
     Ok(())
+}
+
+pub fn logout() -> Result<()> {
+    let path = credentials_path()?;
+    if !path.exists() {
+        println!("Not logged in");
+        return Ok(());
+    }
+    let credentials: Option<Credentials> = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok());
+    if let Some(credentials) = credentials {
+        revoke_token(&credentials.refresh_token);
+    }
+    std::fs::remove_file(&path).with_context(|| format!("failed to remove {}", path.display()))?;
+    println!("Logged out");
+    Ok(())
+}
+
+fn revoke_token(token: &str) {
+    let http = reqwest::blocking::Client::new();
+    match http.post(REVOKE_URL).form(&[("token", token)]).send() {
+        Ok(resp) if resp.status().is_success() => {}
+        Ok(resp) => eprintln!("Warning: token revocation failed ({})", resp.status()),
+        Err(err) => eprintln!("Warning: could not reach the revocation endpoint: {err}"),
+    }
 }
 
 pub fn get_access_token() -> Result<String> {

@@ -18,6 +18,8 @@ struct Cli {
 enum Command {
     #[command(about = "Log in to Firebase with your Google account")]
     Login,
+    #[command(about = "Log out and revoke the stored credentials")]
+    Logout,
     #[command(about = "List accessible Firebase projects")]
     Projects,
     #[command(about = "Set the target Firebase project and app")]
@@ -57,6 +59,7 @@ enum Command {
 fn main() -> Result<()> {
     match Cli::parse().command {
         Command::Login => auth::login(),
+        Command::Logout => auth::logout(),
         Command::Projects => commands::projects(),
         Command::Use { project_id } => commands::use_target(project_id.as_deref()),
         Command::Install { id: Some(id), .. } => commands::install(&id),
