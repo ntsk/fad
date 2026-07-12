@@ -1,32 +1,32 @@
 # fad
 
-Firebase App Distribution から APK / AAB をダウンロードして Android 端末にインストールする CLI ツール。
+A CLI tool to download and install APK / AAB releases from Firebase App Distribution.
 
-## 必要なもの
+## Requirements
 
-- `adb`（PATH 上にあること）
-- `bundletool`（PATH 上にあること。AAB のインストール時に使用）
-- 対象の Firebase プロジェクトにアクセスできる Google アカウント
+- `adb` on PATH
+- `bundletool` on PATH (used when installing AAB releases)
+- A Google account with access to the target Firebase project
 
-## インストール
+## Installation
 
 ```
 cargo install --path .
 ```
 
-## 設定
+## Configuration
 
-`fad login` 後にアクセス可能な Firebase プロジェクトと Android アプリの一覧から対話的に選択でき、選択結果は `~/.config/fad/config.toml` に保存されます。設定がない状態で `fad install` を実行した場合も同じ選択が実行されます。
+After `fad login`, you can interactively pick one of the Firebase projects and Android apps you have access to; the selection is saved to `~/.config/fad/config.toml`. Running `fad install` without a config triggers the same selection.
 
-手動で設定する場合は `~/.config/fad/config.toml` を作成します。
+To configure manually, create `~/.config/fad/config.toml`:
 
 ```toml
 app_id = "1:1234567890:android:0a1b2c3d4e5f"
 ```
 
-`app_id` は Firebase コンソールのプロジェクト設定 > マイアプリで確認できます。プロジェクト番号は `app_id` から自動的に導出されます。
+You can find the `app_id` in the Firebase console under Project settings > Your apps. The project number is derived from the `app_id` automatically.
 
-認証にはデフォルトで Firebase CLI と同じ公開 OAuth クライアントを使用します。独自の OAuth クライアント（デスクトップアプリ種別）を使う場合は次を追加してください。
+By default, fad authenticates with the same public OAuth client as the Firebase CLI. To use your own OAuth client (desktop app type), add:
 
 ```toml
 [oauth]
@@ -34,26 +34,26 @@ client_id = "..."
 client_secret = "..."
 ```
 
-## 使い方
+## Usage
 
 ```
-fad login                 # ブラウザで Google アカウントにログインし、対象アプリを選択
-fad logout                # トークンを失効させて保存済みの認証情報を削除
-fad projects              # アクセス可能な Firebase プロジェクトの一覧を表示（* が現在の対象）
-fad use                   # 対象のプロジェクトとアプリを対話的に選び直す（再ログイン不要）
-fad use <PROJECT_ID>      # プロジェクトを指定して、その中のアプリを選択
-fad install --list        # インストール可能なリリースの一覧を表示
-fad install <ID>          # リリースをダウンロードしてインストール
-fad download <ID>         # リリースのバイナリをカレントディレクトリに保存
-fad download <ID> -o DIR  # 保存先ディレクトリを指定 (-o / --output)
+fad login                 # Sign in with your Google account in the browser and pick the target app
+fad logout                # Revoke the token and delete the stored credentials
+fad projects              # List accessible Firebase projects (* marks the current target)
+fad use                   # Interactively switch the target project and app (no re-login needed)
+fad use <PROJECT_ID>      # Pick an app from the given project
+fad install --list        # List installable releases
+fad install <ID>          # Download and install a release
+fad download <ID>         # Save a release binary to the current directory
+fad download <ID> -o DIR  # Save into the given directory (-o / --output)
 ```
 
-`download` は APK / AAB をそのまま `{バージョン}-{ビルド番号}-{リリースID}.{apk,aab}` という名前で保存します。
+`download` saves the APK / AAB as is, named `{displayVersion}-{buildVersion}-{releaseId}.{apk,aab}`.
 
-対象アプリを切り替えたいときは `fad use` を実行するか、`config.toml` の `app_id` を書き換えてください。
+To switch the target app, run `fad use` or edit `app_id` in `config.toml`.
 
-## 動作の詳細
+## How it works
 
-- `fad login` はブラウザで OpenID Connect (OAuth 2.0) 認証を行い、トークンを `~/.config/fad/credentials.json` に保存します
-- APK のリリースはそのまま `adb install -r` でインストールします
-- AAB のリリースは `bundletool build-apks --mode=universal` で universal APK に変換してからインストールします（署名にはデフォルトの debug keystore `~/.android/debug.keystore` が使われます）
+- `fad login` performs OpenID Connect (OAuth 2.0) authentication in the browser and stores tokens in `~/.config/fad/credentials.json`
+- APK releases are installed directly with `adb install -r`
+- AAB releases are converted to a universal APK with `bundletool build-apks --mode=universal` before installing (signed with the default debug keystore at `~/.android/debug.keystore`)
