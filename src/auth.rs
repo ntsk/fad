@@ -70,7 +70,7 @@ pub fn login() -> Result<()> {
 
     let code = wait_for_code(&listener, &state, LOGIN_TIMEOUT)?;
 
-    let http = reqwest::blocking::Client::new();
+    let http = crate::http::client();
     let resp = http
         .post(TOKEN_URL)
         .form(&[
@@ -132,7 +132,7 @@ pub fn logout() -> Result<()> {
 }
 
 fn revoke_token(token: &str) {
-    let http = reqwest::blocking::Client::new();
+    let http = crate::http::client();
     match http.post(REVOKE_URL).form(&[("token", token)]).send() {
         Ok(resp) if resp.status().is_success() => {}
         Ok(resp) => eprintln!("Warning: token revocation failed ({})", resp.status()),
@@ -146,7 +146,7 @@ pub fn get_access_token() -> Result<String> {
         return Ok(credentials.access_token);
     }
     let (client_id, client_secret) = oauth_client()?;
-    let http = reqwest::blocking::Client::new();
+    let http = crate::http::client();
     let resp = http
         .post(TOKEN_URL)
         .form(&[
