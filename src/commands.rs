@@ -110,6 +110,7 @@ pub fn install(id: &str) -> Result<()> {
             apk_path
         }
         BinaryKind::Aab => {
+            require_tool("bundletool")?;
             let aab_path = temp_dir.path().join("app.aab");
             std::fs::rename(&download_path, &aab_path)
                 .context("failed to move the downloaded file")?;
