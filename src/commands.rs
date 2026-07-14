@@ -49,8 +49,8 @@ pub fn list() -> Result<()> {
         .iter()
         .map(|release| {
             (
-                release.id().to_string(),
-                release.version(),
+                sanitize_display(release.id()),
+                sanitize_display(&release.version()),
                 release.binary_type(),
                 format_time(&release.create_time),
                 summarize(release.notes(), 50),
@@ -287,8 +287,15 @@ fn format_time(create_time: &str) -> String {
     create_time.replace('T', " ").chars().take(16).collect()
 }
 
+fn sanitize_display(text: &str) -> String {
+    text.chars()
+        .map(|c| if c.is_control() { ' ' } else { c })
+        .collect()
+}
+
 fn summarize(notes: &str, max_chars: usize) -> String {
-    let first_line = notes.lines().next().unwrap_or("").trim();
+    let first_line = sanitize_display(notes.lines().next().unwrap_or(""));
+    let first_line = first_line.trim();
     let mut summary: String = first_line.chars().take(max_chars).collect();
     if first_line.chars().count() > max_chars {
         summary.push('…');
@@ -426,5 +433,16 @@ mod tests {
         assert_eq!(summarize("first line\nsecond", 50), "first line");
         assert_eq!(summarize("abcdef", 3), "abc…");
         assert_eq!(summarize("", 10), "");
+    }
+
+    #[test]
+    fn sanitizes_control_characters_for_display() {
+        assert_eq!(sanitize_display("a\x1b[0mb\tc"), "a [0mb c");
+        assert_eq!(sanitize_display("plain text"), "plain text");
+    }
+
+    #[test]
+    fn summarize_neutralizes_ansi_escapes_in_notes() {
+        assert_eq!(summarize("boom\x1b[31mred", 50), "boom [31mred");
     }
 }
