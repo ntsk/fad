@@ -1,8 +1,7 @@
 use anyhow::{bail, Context, Result};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
-use rand::distributions::Alphanumeric;
-use rand::Rng;
+use rand::distr::{Alphanumeric, Distribution};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, ErrorKind, Write};
@@ -46,8 +45,8 @@ pub fn login() -> Result<()> {
     let listener = bind_listener()?;
     let port = listener.local_addr()?.port();
     let redirect_uri = redirect_uri(port);
-    let state: String = rand::thread_rng()
-        .sample_iter(&Alphanumeric)
+    let state: String = Alphanumeric
+        .sample_iter(&mut rand::rng())
         .take(32)
         .map(char::from)
         .collect();
