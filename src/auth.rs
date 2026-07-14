@@ -45,7 +45,7 @@ pub fn login() -> Result<()> {
     let (client_id, client_secret) = oauth_client()?;
     let listener = bind_listener()?;
     let port = listener.local_addr()?.port();
-    let redirect_uri = format!("http://localhost:{port}");
+    let redirect_uri = redirect_uri(port);
     let state: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
         .take(32)
@@ -184,6 +184,10 @@ fn oauth_client() -> Result<(String, String)> {
             .client_secret
             .unwrap_or_else(|| DEFAULT_CLIENT_SECRET.to_string()),
     ))
+}
+
+fn redirect_uri(port: u16) -> String {
+    format!("http://127.0.0.1:{port}")
 }
 
 fn bind_listener() -> Result<TcpListener> {
@@ -410,6 +414,11 @@ mod tests {
         let err = wait_for_code(&listener, "st1", Duration::from_millis(150)).unwrap_err();
 
         assert!(err.to_string().contains("timed out"));
+    }
+
+    #[test]
+    fn redirect_uri_uses_ipv4_loopback() {
+        assert_eq!(redirect_uri(9005), "http://127.0.0.1:9005");
     }
 
     #[test]
