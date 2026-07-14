@@ -48,7 +48,7 @@ struct AndroidApp {
 
 pub fn select_and_save(token: &str) -> Result<()> {
     require_terminal()?;
-    let http = reqwest::blocking::Client::new();
+    let http = crate::http::client();
     let mut projects = list_projects(&http, token)?;
     if projects.is_empty() {
         println!("No Firebase projects are accessible with this account");
@@ -80,7 +80,7 @@ pub fn select_and_save(token: &str) -> Result<()> {
 
 pub fn select_app_in_project(token: &str, project_id: &str) -> Result<()> {
     require_terminal()?;
-    let http = reqwest::blocking::Client::new();
+    let http = crate::http::client();
     choose_and_save_app(&http, token, project_id)
 }
 
@@ -113,7 +113,7 @@ fn save_app_id(app_id: &str) -> Result<()> {
 }
 
 pub fn print_projects(token: &str) -> Result<()> {
-    let http = reqwest::blocking::Client::new();
+    let http = crate::http::client();
     let mut projects = list_projects(&http, token)?;
     if projects.is_empty() {
         println!("No Firebase projects are accessible with this account");

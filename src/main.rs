@@ -3,6 +3,7 @@ mod apps;
 mod auth;
 mod commands;
 mod config;
+mod http;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
