@@ -1,5 +1,8 @@
 # fad
 
+[![CI](https://github.com/ntsk/fad/actions/workflows/ci.yml/badge.svg)](https://github.com/ntsk/fad/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 A CLI tool to download and install APK / AAB releases from Firebase App Distribution.
 
 ## Requirements
@@ -10,7 +13,21 @@ A CLI tool to download and install APK / AAB releases from Firebase App Distribu
 
 ## Installation
 
+### Homebrew
+
+```bash
+brew install ntsk/tap/fad
 ```
+
+### Nix
+
+```bash
+nix run github:ntsk/fad
+```
+
+### From source
+
+```bash
 cargo install --path .
 ```
 
