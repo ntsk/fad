@@ -31,25 +31,15 @@ nix run github:ntsk/fad
 cargo install --path .
 ```
 
-## Configuration
+## Get Started
 
-After `fad login`, you can interactively pick one of the Firebase projects and Android apps you have access to; the selection is saved to `~/.config/fad/config.toml`. Running `fad install` without a config triggers the same selection.
-
-To configure manually, create `~/.config/fad/config.toml`:
-
-```toml
-app_id = "1:1234567890:android:0a1b2c3d4e5f"
+```bash
+fad login          # Sign in with Google in the browser and pick the target app
+fad releases       # List the app's releases
+fad install <ID>   # Download and install one
 ```
 
-You can find the `app_id` in the Firebase console under Project settings > Your apps. The project number is derived from the `app_id` automatically.
-
-By default, fad authenticates with the same public OAuth client as the Firebase CLI. To use your own OAuth client (desktop app type), add:
-
-```toml
-[oauth]
-client_id = "..."
-client_secret = "..."
-```
+`fad login` opens your browser to sign in, then lets you interactively pick a Firebase project and Android app. The choice is saved to `~/.config/fad/config.toml`, so you only do this once — no manual setup required.
 
 ## Usage
 
@@ -68,6 +58,26 @@ fad download <ID> -o DIR  # Save into the given directory (-o / --output)
 `download` saves the APK / AAB as is, named `{displayVersion}-{buildVersion}-{releaseId}.{apk,aab}`.
 
 To switch the target app, run `fad use` or edit `app_id` in `config.toml`.
+
+## Configuration (optional)
+
+fad works out of the box after `fad login`, so this section is only needed if you want to bypass the interactive picker or use your own OAuth client.
+
+Set the target app manually by creating `~/.config/fad/config.toml`:
+
+```toml
+app_id = "1:1234567890:android:0a1b2c3d4e5f"
+```
+
+You can find the `app_id` in the Firebase console under Project settings > Your apps. The project number is derived from the `app_id` automatically.
+
+By default, fad authenticates with the same public OAuth client as the Firebase CLI. To use your own OAuth client (desktop app type), add:
+
+```toml
+[oauth]
+client_id = "..."
+client_secret = "..."
+```
 
 ## How it works
 
