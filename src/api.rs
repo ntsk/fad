@@ -1,5 +1,6 @@
 use std::fs::File;
 use std::path::Path;
+use std::time::{Duration, Instant};
 
 use anyhow::{bail, Context, Result};
 use indicatif::{ProgressBar, ProgressStyle};
@@ -9,6 +10,9 @@ use crate::auth;
 use crate::config::Config;
 
 const BASE_URL: &str = "https://firebaseappdistribution.googleapis.com/v1";
+const UPLOAD_BASE_URL: &str = "https://firebaseappdistribution.googleapis.com/upload/v1";
+const UPLOAD_POLL_INTERVAL: Duration = Duration::from_secs(2);
+const UPLOAD_POLL_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +43,30 @@ struct ListReleasesResponse {
     releases: Vec<Release>,
     #[serde(default)]
     next_page_token: Option<String>,
+}
+
+#[derive(Deserialize)]
+struct Operation {
+    name: String,
+    #[serde(default)]
+    done: bool,
+    #[serde(default)]
+    error: Option<OperationError>,
+    #[serde(default)]
+    response: Option<UploadReleaseResponse>,
+}
+
+#[derive(Deserialize)]
+struct OperationError {
+    #[serde(default)]
+    message: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct UploadReleaseResponse {
+    #[serde(default)]
+    release: Option<Release>,
 }
 
 impl Release {
@@ -86,6 +114,7 @@ pub struct Client {
     http: reqwest::blocking::Client,
     token: String,
     base_url: String,
+    upload_base_url: String,
     project_number: String,
     app_id: String,
 }
@@ -93,19 +122,30 @@ pub struct Client {
 impl Client {
     pub fn new(config: &Config) -> Result<Self> {
         let token = auth::get_access_token()?;
-        Self::with_token(config, token, BASE_URL.to_string())
+        Self::with_token(
+            config,
+            token,
+            BASE_URL.to_string(),
+            UPLOAD_BASE_URL.to_string(),
+        )
     }
 
-    fn with_token(config: &Config, token: String, base_url: String) -> Result<Self> {
+    fn with_token(
+        config: &Config,
+        token: String,
+        base_url: String,
+        upload_base_url: String,
+    ) -> Result<Self> {
         let http = reqwest::blocking::Client::builder()
             .timeout(None)
-            .connect_timeout(std::time::Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(10))
             .build()
             .context("failed to build the HTTP client")?;
         Ok(Self {
             http,
             token,
             base_url,
+            upload_base_url,
             project_number: config.project_number()?,
             app_id: config.app_id.clone(),
         })
@@ -115,6 +155,13 @@ impl Client {
         format!(
             "{}/projects/{}/apps/{}/releases",
             self.base_url, self.project_number, self.app_id
+        )
+    }
+
+    fn upload_url(&self) -> String {
+        format!(
+            "{}/projects/{}/apps/{}/releases:upload",
+            self.upload_base_url, self.project_number, self.app_id
         )
     }
 
@@ -191,6 +238,68 @@ impl Client {
         }
         Ok(())
     }
+
+    pub fn upload_release(&self, path: &Path) -> Result<Release> {
+        let bytes =
+            std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
+        let file_name = path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("app.bin");
+        let resp = self
+            .http
+            .post(self.upload_url())
+            .bearer_auth(&self.token)
+            .header("X-Goog-Upload-Protocol", "raw")
+            .header("X-Goog-Upload-File-Name", file_name)
+            .header("Content-Type", "application/octet-stream")
+            .body(bytes)
+            .send()
+            .context("failed to reach the App Distribution upload API")?;
+        let resp = check(resp)?;
+        let operation: Operation = resp.json().context("failed to parse the upload response")?;
+        self.await_operation(operation)
+    }
+
+    fn await_operation(&self, mut operation: Operation) -> Result<Release> {
+        let deadline = Instant::now() + UPLOAD_POLL_TIMEOUT;
+        loop {
+            if let Some(error) = operation.error {
+                bail!("the upload could not be processed: {}", error.message);
+            }
+            if operation.done {
+                return operation
+                    .response
+                    .and_then(|response| response.release)
+                    .context("the upload finished but no release was returned");
+            }
+            if Instant::now() >= deadline {
+                bail!("timed out waiting for the uploaded binary to be processed");
+            }
+            std::thread::sleep(UPLOAD_POLL_INTERVAL);
+            let resp = self
+                .http
+                .get(format!("{}/{}", self.base_url, operation.name))
+                .bearer_auth(&self.token)
+                .send()
+                .context("failed to reach the App Distribution API")?;
+            let resp = check(resp)?;
+            operation = resp.json().context("failed to parse the upload status")?;
+        }
+    }
+
+    pub fn set_release_notes(&self, release_name: &str, notes: &str) -> Result<()> {
+        let resp = self
+            .http
+            .patch(format!("{}/{release_name}", self.base_url))
+            .query(&[("updateMask", "release_notes.text")])
+            .bearer_auth(&self.token)
+            .json(&serde_json::json!({ "releaseNotes": { "text": notes } }))
+            .send()
+            .context("failed to reach the App Distribution API")?;
+        check(resp)?;
+        Ok(())
+    }
 }
 
 pub(crate) fn check(resp: reqwest::blocking::Response) -> Result<reqwest::blocking::Response> {
@@ -229,7 +338,13 @@ mod tests {
 
     fn test_client(server: &mockito::ServerGuard) -> Client {
         let config: Config = toml::from_str("app_id = \"1:1:android:a\"").unwrap();
-        Client::with_token(&config, "test-token".to_string(), server.url()).unwrap()
+        Client::with_token(
+            &config,
+            "test-token".to_string(),
+            server.url(),
+            server.url(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -399,5 +514,77 @@ mod tests {
         let body = "{\"error\": {\"message\": \"boom\"}}";
         assert_eq!(api_error_message(body), "boom");
         assert_eq!(api_error_message("plain"), "plain");
+    }
+
+    #[test]
+    fn upload_release_uploads_then_polls_operation() {
+        let mut server = mockito::Server::new();
+        let upload = server
+            .mock("POST", "/projects/1/apps/1:1:android:a/releases:upload")
+            .match_header("authorization", "Bearer test-token")
+            .match_header("x-goog-upload-protocol", "raw")
+            .match_header("x-goog-upload-file-name", "app.apk")
+            .match_body("apk-bytes")
+            .with_body(
+                r#"{"name":"projects/1/apps/1:1:android:a/releases/-/operations/op1","done":false}"#,
+            )
+            .create();
+        let poll = server
+            .mock(
+                "GET",
+                "/projects/1/apps/1:1:android:a/releases/-/operations/op1",
+            )
+            .with_body(
+                r#"{"name":"op1","done":true,"response":{"release":{"name":"projects/1/apps/a/releases/r7","displayVersion":"1.2.3","buildVersion":"45"}}}"#,
+            )
+            .create();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.apk");
+        std::fs::write(&path, "apk-bytes").unwrap();
+
+        let release = test_client(&server).upload_release(&path).unwrap();
+
+        assert_eq!(release.id(), "r7");
+        assert_eq!(release.version(), "1.2.3 (45)");
+        upload.assert();
+        poll.assert();
+    }
+
+    #[test]
+    fn upload_release_reports_operation_error() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/projects/1/apps/1:1:android:a/releases:upload")
+            .with_body(r#"{"name":"op1","done":true,"error":{"message":"invalid binary"}}"#)
+            .create();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.apk");
+        std::fs::write(&path, "apk-bytes").unwrap();
+
+        let err = test_client(&server).upload_release(&path).unwrap_err();
+
+        assert!(err.to_string().contains("invalid binary"));
+    }
+
+    #[test]
+    fn set_release_notes_sends_patch_with_update_mask() {
+        let mut server = mockito::Server::new();
+        let patch = server
+            .mock("PATCH", "/projects/1/apps/a/releases/r7")
+            .match_query(Matcher::UrlEncoded(
+                "updateMask".into(),
+                "release_notes.text".into(),
+            ))
+            .match_body(Matcher::JsonString(
+                r#"{"releaseNotes":{"text":"Fix login"}}"#.into(),
+            ))
+            .with_body("{}")
+            .create();
+
+        test_client(&server)
+            .set_release_notes("projects/1/apps/a/releases/r7", "Fix login")
+            .unwrap();
+
+        patch.assert();
     }
 }

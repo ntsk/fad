@@ -82,6 +82,29 @@ pub fn list() -> Result<()> {
     Ok(())
 }
 
+pub fn upload(file: &Path, notes: Option<&str>) -> Result<()> {
+    if !file.is_file() {
+        bail!("file not found: {}", file.display());
+    }
+    detect_binary_kind(file)
+        .with_context(|| format!("{} is not a valid APK or AAB", file.display()))?;
+    let config = load_or_select_config()?;
+    let client = Client::new(&config)?;
+    println!("Uploading {}...", file.display());
+    let release = client.upload_release(file)?;
+    println!(
+        "Release created: {} (version {})",
+        release.id(),
+        release.version()
+    );
+    if let Some(notes) = notes {
+        client.set_release_notes(&release.name, notes)?;
+        println!("Release notes set");
+    }
+    println!("Run `fad releases` to see it");
+    Ok(())
+}
+
 pub fn install(id: &str) -> Result<()> {
     let release_id = normalize_release_id(id)?;
     let config = load_or_select_config()?;
