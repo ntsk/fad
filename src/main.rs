@@ -33,6 +33,18 @@ enum Command {
     },
     #[command(about = "List releases of the target app")]
     Releases,
+    #[command(about = "Upload an APK/AAB as a new release")]
+    Upload {
+        #[arg(value_name = "FILE", help = "Path to the APK or AAB to upload")]
+        file: std::path::PathBuf,
+        #[arg(
+            short,
+            long,
+            value_name = "NOTES",
+            help = "Release notes to attach to the uploaded build"
+        )]
+        notes: Option<String>,
+    },
     #[command(about = "Download and install a release")]
     Install {
         #[arg(value_name = "ID", help = "Release ID to install")]
@@ -59,6 +71,7 @@ fn main() -> Result<()> {
         Command::Projects => commands::projects(),
         Command::Use { project_id } => commands::use_target(project_id.as_deref()),
         Command::Releases => commands::list(),
+        Command::Upload { file, notes } => commands::upload(&file, notes.as_deref()),
         Command::Install { id } => commands::install(&id),
         Command::Download { id, output } => commands::download(&id, output),
     }

@@ -50,6 +50,8 @@ fad projects              # List accessible Firebase projects (* marks the curre
 fad use                   # Interactively switch the target project and app (no re-login needed)
 fad use <PROJECT_ID>      # Pick an app from the given project
 fad releases              # List releases of the target app
+fad upload <FILE>         # Upload an APK/AAB as a new release
+fad upload <FILE> -n MSG  # Upload and attach release notes (-n / --notes)
 fad install <ID>          # Download and install a release
 fad download <ID>         # Save a release binary to the current directory
 fad download <ID> -o DIR  # Save into the given directory (-o / --output)
