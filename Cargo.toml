@@ -2,7 +2,7 @@
 name = "fad"
 version = "0.1.0"
 edition = "2021"
-description = "CLI tool to download and install APK/AAB releases from Firebase App Distribution"
+description = "CLI tool to upload, download, and install APK/AAB releases on Firebase App Distribution"
 license = "MIT"
 repository = "https://github.com/ntsk/fad"
 readme = "README.md"

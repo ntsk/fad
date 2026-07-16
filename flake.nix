@@ -1,5 +1,5 @@
 {
-  description = "A CLI tool to download and install APK / AAB releases from Firebase App Distribution";
+  description = "A CLI tool to upload, download, and install APK / AAB releases on Firebase App Distribution";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -28,7 +28,7 @@
           ];
 
           meta = with pkgs.lib; {
-            description = "A CLI tool to download and install APK / AAB releases from Firebase App Distribution";
+            description = "A CLI tool to upload, download, and install APK / AAB releases on Firebase App Distribution";
             homepage = "https://github.com/ntsk/fad";
             license = licenses.mit;
             maintainers = [ ];

@@ -3,7 +3,7 @@
 [![CI](https://github.com/ntsk/fad/actions/workflows/ci.yml/badge.svg)](https://github.com/ntsk/fad/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-A CLI tool to download and install APK / AAB releases from Firebase App Distribution.
+A CLI tool to upload, download, and install APK / AAB releases on Firebase App Distribution.
 
 ## Requirements
 
