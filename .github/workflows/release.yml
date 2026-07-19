@@ -72,18 +72,26 @@ jobs:
             -e "s/@@SHA_LINUX_ARM@@/$(sha aarch64-unknown-linux-gnu)/" \
             -e "s/@@SHA_LINUX_INTEL@@/$(sha x86_64-unknown-linux-gnu)/" \
             .github/homebrew/fad.rb > formula.rb
+      - name: Generate a token for the tap
+        uses: actions/create-github-app-token@v3
+        id: app-token
+        with:
+          app-id: ${{ vars.TAP_APP_ID }}
+          private-key: ${{ secrets.TAP_APP_PRIVATE_KEY }}
+          owner: ntsk
+          repositories: homebrew-tap
       - name: Check out the Homebrew tap
         uses: actions/checkout@v7
         with:
           repository: ntsk/homebrew-tap
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           path: tap
       - name: Copy formula into the tap
         run: cp formula.rb tap/Formula/fad.rb
       - name: Open a pull request on the tap
         uses: peter-evans/create-pull-request@v8
         with:
-          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          token: ${{ steps.app-token.outputs.token }}
           path: tap
           branch: bump-fad-${{ github.ref_name }}
           title: "Update fad to ${{ github.ref_name }}"
