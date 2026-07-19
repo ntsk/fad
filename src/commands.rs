@@ -45,6 +45,23 @@ impl SigningOptions {
     }
 }
 
+fn find_debug_keystore(bases: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    bases
+        .into_iter()
+        .filter(|base| base.is_dir())
+        .map(|base| base.join(".android").join("debug.keystore"))
+        .find(|path| path.is_file())
+}
+
+fn debug_keystore() -> Option<PathBuf> {
+    let bases = [
+        std::env::var_os("ANDROID_SDK_HOME").map(PathBuf::from),
+        dirs::home_dir(),
+        std::env::var_os("HOME").map(PathBuf::from),
+    ];
+    find_debug_keystore(bases.into_iter().flatten())
+}
+
 fn load_or_select_config() -> Result<Config> {
     match config::load_optional()? {
         Some(config) => Ok(config),
@@ -146,6 +163,14 @@ pub fn install(id: &str, signing: &SigningOptions) -> Result<()> {
     require_tool("adb")?;
     if release.binary_type() == "AAB" {
         require_tool("bundletool")?;
+        // With no keystore, bundletool emits an unsigned (and thus uninstallable) APK
+        // and still exits successfully, so the failure would only surface at `adb install`.
+        // fad always installs the result, so require a signing key up front.
+        if signing_args.is_empty() && debug_keystore().is_none() {
+            bail!(
+                "no keystore available to sign the AAB; installing it would fail.\nPass --ks (with --ks-pass / --ks-key-alias / --key-pass), or create a debug keystore at ~/.android/debug.keystore"
+            );
+        }
     }
     println!(
         "Installing release {} (version {})",
@@ -551,10 +576,8 @@ mod tests {
         std::fs::create_dir_all(ks.parent().unwrap()).unwrap();
         std::fs::write(&ks, "keystore").unwrap();
 
-        let found = find_debug_keystore([
-            missing.path().to_path_buf(),
-            present.path().to_path_buf(),
-        ]);
+        let found =
+            find_debug_keystore([missing.path().to_path_buf(), present.path().to_path_buf()]);
 
         assert_eq!(found, Some(ks));
     }

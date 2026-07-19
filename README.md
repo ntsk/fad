@@ -86,7 +86,7 @@ client_secret = "..."
 
 - `fad login` performs OpenID Connect (OAuth 2.0) authentication in the browser and stores tokens in `~/.config/fad/credentials.json`
 - APK releases are installed directly with `adb install -r`
-- AAB releases are converted to a universal APK with `bundletool build-apks --mode=universal` before installing. By default bundletool signs it with the debug keystore at `~/.android/debug.keystore`; pass `--ks` / `--ks-pass` / `--ks-key-alias` / `--key-pass` to `fad install` to sign with your own keystore (e.g. the release key) instead
+- AAB releases are converted to a universal APK with `bundletool build-apks --mode=universal` before installing. By default bundletool signs it with the debug keystore at `~/.android/debug.keystore`; pass `--ks` / `--ks-pass` / `--ks-key-alias` / `--key-pass` to `fad install` to sign with your own keystore (e.g. the release key) instead. If no keystore is given and no debug keystore exists, `fad install` stops early rather than producing an unsigned, uninstallable APK
 
 ## Disclaimer
 
