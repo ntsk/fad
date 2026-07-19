@@ -5,6 +5,8 @@
 
 A CLI tool to upload, download, and install APK / AAB releases on Firebase App Distribution.
 
+Unlike the Firebase App Tester app, `fad` installs a release straight onto a connected device from the command line (via `adb`) — no tester app to set up, no email invite, and no tapping through a UI. Because every step is a plain command, it slots neatly into CI pipelines and AI/agent workflows that need to grab a build and install it without a human in the loop.
+
 ## Requirements
 
 - `adb` on PATH
