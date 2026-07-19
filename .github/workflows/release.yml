@@ -6,7 +6,7 @@ on:
       - "v*"
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -15,6 +15,10 @@ jobs:
   build:
     name: Build ${{ matrix.target }}
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: write
+    env:
+      TAG: ${{ github.ref_name }}
     strategy:
       fail-fast: false
       matrix:
@@ -28,35 +32,44 @@ jobs:
           - target: aarch64-unknown-linux-gnu
             os: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         with:
           key: ${{ matrix.target }}
       - name: Build
         run: cargo build --release --locked --target ${{ matrix.target }}
       - name: Package
         run: |
-          staging="fad-${{ github.ref_name }}-${{ matrix.target }}"
+          staging="fad-${TAG}-${{ matrix.target }}"
           mkdir "$staging"
           cp "target/${{ matrix.target }}/release/fad" "$staging/"
           cp README.md LICENSE "$staging/"
           tar czf "$staging.tar.gz" "$staging"
           shasum -a 256 "$staging.tar.gz" > "$staging.tar.gz.sha256"
-      - uses: softprops/action-gh-release@v3
+      - name: Install cargo-deb
+        if: contains(matrix.target, 'linux')
+        uses: taiki-e/install-action@07b4745e0c39a41822af610387492e3e53aa222b # v2.83.4
+        with:
+          tool: cargo-deb
+      - name: Build .deb
+        if: contains(matrix.target, 'linux')
+        run: cargo deb --no-build --target ${{ matrix.target }} --output "fad-${TAG}-${{ matrix.target }}.deb"
+      - uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           files: |
             fad-*.tar.gz
             fad-*.tar.gz.sha256
+            fad-*.deb
 
   update-formula:
     name: Update Homebrew formula
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       - name: Render formula from release checksums
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -73,7 +86,7 @@ jobs:
             -e "s/@@SHA_LINUX_INTEL@@/$(sha x86_64-unknown-linux-gnu)/" \
             .github/homebrew/fad.rb > formula.rb
       - name: Generate a token for the tap
-        uses: actions/create-github-app-token@v3
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         id: app-token
         with:
           app-id: ${{ vars.TAP_APP_ID }}
@@ -81,7 +94,7 @@ jobs:
           owner: ntsk
           repositories: homebrew-tap
       - name: Check out the Homebrew tap
-        uses: actions/checkout@v7
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           repository: ntsk/homebrew-tap
           token: ${{ steps.app-token.outputs.token }}
@@ -89,7 +102,7 @@ jobs:
       - name: Copy formula into the tap
         run: cp formula.rb tap/Formula/fad.rb
       - name: Open a pull request on the tap
-        uses: peter-evans/create-pull-request@v8
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
         with:
           token: ${{ steps.app-token.outputs.token }}
           path: tap
@@ -98,3 +111,33 @@ jobs:
           commit-message: "Update fad to ${{ github.ref_name }}"
           body: "Automated formula update for fad ${{ github.ref_name }}."
           delete-branch: true
+
+  publish-aur:
+    name: Publish AUR package
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - name: Render PKGBUILD from release checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sha256' --dir sha
+          sha() { awk '{print $1}' "sha/fad-${TAG}-$1.tar.gz.sha256"; }
+          mkdir -p aur
+          sed \
+            -e "s/@@VERSION@@/${version}/g" \
+            -e "s/@@SHA_LINUX_INTEL@@/$(sha x86_64-unknown-linux-gnu)/" \
+            -e "s/@@SHA_LINUX_ARM@@/$(sha aarch64-unknown-linux-gnu)/" \
+            .github/aur/PKGBUILD > aur/PKGBUILD
+      - name: Publish to the AUR
+        uses: KSXGitHub/github-actions-deploy-aur@084b0d9b15415bf9cdb65d44dad1efe37a354050 # v4.2.0
+        with:
+          pkgname: fad-bin
+          pkgbuild: aur/PKGBUILD
+          commit_username: ntsk
+          commit_email: ntsk@users.noreply.github.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ github.ref_name }}"

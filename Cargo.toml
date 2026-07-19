@@ -9,6 +9,11 @@ readme = "README.md"
 keywords = ["firebase", "app-distribution", "android", "cli", "apk"]
 categories = ["command-line-utilities", "development-tools"]
 
+[package.metadata.deb]
+maintainer = "ntsk <ntsk@users.noreply.github.com>"
+section = "utils"
+priority = "optional"
+
 [dev-dependencies]
 mockito = "1"
 
