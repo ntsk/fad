@@ -587,4 +587,16 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         assert!(find_debug_keystore([dir.path().to_path_buf()]).is_none());
     }
+
+    #[test]
+    fn app_flag_overrides_config_target() {
+        let config = resolve_config(Some("1:1234567890:android:abc")).unwrap();
+        assert_eq!(config.app_id, "1:1234567890:android:abc");
+        assert_eq!(config.project_number().unwrap(), "1234567890");
+    }
+
+    #[test]
+    fn app_flag_rejects_invalid_app_id() {
+        assert!(resolve_config(Some("not-an-app-id")).is_err());
+    }
 }
