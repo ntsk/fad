@@ -1,12 +1,13 @@
 use anyhow::{bail, Context, Result};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use rand::distr::{Alphanumeric, Distribution};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use url::Url;
 
@@ -22,6 +23,9 @@ const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
 const SCOPES: &str =
     "openid email https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/firebase";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
+const SA_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
+const JWT_BEARER_GRANT: &str = "urn:ietf:params:oauth:grant-type:jwt-bearer";
+const SA_TOKEN_LIFETIME: u64 = 3600;
 
 #[derive(Serialize, Deserialize)]
 struct Credentials {
@@ -140,6 +144,12 @@ fn revoke_token(token: &str) {
 }
 
 pub fn get_access_token() -> Result<String> {
+    if !credentials_path()?.exists() {
+        if let Some(path) = service_account_path() {
+            let sa = load_service_account(&path)?;
+            return service_account_access_token(&sa);
+        }
+    }
     let mut credentials = load_credentials()?;
     if credentials.expires_at > now() + 60 {
         return Ok(credentials.access_token);
@@ -169,6 +179,105 @@ pub fn get_access_token() -> Result<String> {
     }
     save_credentials(&credentials)?;
     Ok(token.access_token)
+}
+
+#[derive(Debug, Deserialize)]
+struct ServiceAccount {
+    client_email: String,
+    private_key: String,
+    #[serde(default = "default_token_uri")]
+    token_uri: String,
+    #[serde(default)]
+    private_key_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ServiceAccountClaims<'a> {
+    iss: &'a str,
+    scope: &'a str,
+    aud: &'a str,
+    iat: u64,
+    exp: u64,
+}
+
+fn default_token_uri() -> String {
+    TOKEN_URL.to_string()
+}
+
+fn service_account_path() -> Option<PathBuf> {
+    std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn load_service_account(path: &Path) -> Result<ServiceAccount> {
+    let text = std::fs::read_to_string(path).with_context(|| {
+        format!(
+            "failed to read the service account key at {}",
+            path.display()
+        )
+    })?;
+    parse_service_account(&text)
+}
+
+fn parse_service_account(json: &str) -> Result<ServiceAccount> {
+    serde_json::from_str(json).context("failed to parse the service account key JSON")
+}
+
+fn build_assertion(sa: &ServiceAccount, now: u64) -> Result<String> {
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = sa.private_key_id.clone();
+    let key = EncodingKey::from_rsa_pem(sa.private_key.as_bytes())
+        .context("invalid service account private key")?;
+    let claims = ServiceAccountClaims {
+        iss: &sa.client_email,
+        scope: SA_SCOPE,
+        aud: &sa.token_uri,
+        iat: now,
+        exp: now + SA_TOKEN_LIFETIME,
+    };
+    encode(&header, &claims, &key).context("failed to sign the service account assertion")
+}
+
+fn service_account_access_token(sa: &ServiceAccount) -> Result<String> {
+    let assertion = build_assertion(sa, now())?;
+    let http = crate::http::client();
+    request_service_account_token(&http, &sa.token_uri, &assertion)
+}
+
+fn request_service_account_token(
+    http: &reqwest::blocking::Client,
+    token_uri: &str,
+    assertion: &str,
+) -> Result<String> {
+    let resp = http
+        .post(token_uri)
+        .form(&[("grant_type", JWT_BEARER_GRANT), ("assertion", assertion)])
+        .send()
+        .context("failed to reach the token endpoint")?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        bail!(
+            "service account token request failed ({status}): {}",
+            service_account_token_error(&body)
+        );
+    }
+    let token: TokenResponse = resp.json().context("failed to parse the token response")?;
+    Ok(token.access_token)
+}
+
+fn service_account_token_error(body: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error_description")
+                .or_else(|| value.get("error"))
+                .and_then(|field| field.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| body.to_string())
 }
 
 fn oauth_client() -> Result<(String, String)> {
@@ -306,7 +415,9 @@ fn save_credentials(credentials: &Credentials) -> Result<()> {
 
 fn load_credentials() -> Result<Credentials> {
     let path = credentials_path()?;
-    let text = std::fs::read_to_string(&path).context("not logged in; run `fad login` first")?;
+    let text = std::fs::read_to_string(&path).context(
+        "not logged in; run `fad login` first, or set GOOGLE_APPLICATION_CREDENTIALS to a service account key",
+    )?;
     serde_json::from_str(&text)
         .with_context(|| format!("failed to parse {}; run `fad login` again", path.display()))
 }

@@ -81,9 +81,21 @@ client_id = "..."
 client_secret = "..."
 ```
 
+## Service account (CI)
+
+For non-interactive use such as CI, authenticate with a service account instead of `fad login`. Point `GOOGLE_APPLICATION_CREDENTIALS` at a service account JSON key, the same way the Firebase CLI does:
+
+```bash
+export GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/service-account.json
+fad upload app.apk -n "CI build"
+```
+
+The service account needs the **Firebase App Distribution Admin** role. When `GOOGLE_APPLICATION_CREDENTIALS` is set and you are not logged in, fad mints an access token from the key via the JWT bearer flow. A stored `fad login` session takes precedence, so this only kicks in on machines that have not logged in.
+
 ## How it works
 
 - `fad login` performs OpenID Connect (OAuth 2.0) authentication in the browser and stores tokens in `~/.config/fad/credentials.json`
+- With `GOOGLE_APPLICATION_CREDENTIALS` set (and no stored login), fad signs a JWT with the service account key and exchanges it for an access token
 - APK releases are installed directly with `adb install -r`
 - AAB releases are converted to a universal APK with `bundletool build-apks --mode=universal` before installing (signed with the default debug keystore at `~/.android/debug.keystore`)
 
