@@ -60,6 +60,8 @@ fad download <ID> -o DIR  # Save into the given directory (-o / --output)
 
 `download` saves the APK / AAB as is, named `{displayVersion}-{buildVersion}-{releaseId}.{apk,aab}`.
 
+`releases`, `upload`, `install`, and `download` accept `--app <APP_ID>` to target a specific Firebase App ID, overriding the `app_id` in `config.toml`. This is handy in CI, where you can pass the target app without an interactive `fad use` or a committed config file.
+
 To switch the target app, run `fad use` or edit `app_id` in `config.toml`.
 
 ## Configuration (optional)

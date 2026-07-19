@@ -73,6 +73,20 @@ fn load_or_select_config() -> Result<Config> {
     }
 }
 
+fn resolve_config(app: Option<&str>) -> Result<Config> {
+    match app {
+        Some(app_id) => {
+            let config = Config {
+                app_id: app_id.to_string(),
+                oauth: config::OauthConfig::default(),
+            };
+            config.project_number()?;
+            Ok(config)
+        }
+        None => load_or_select_config(),
+    }
+}
+
 pub fn projects() -> Result<()> {
     let token = auth::get_access_token()?;
     apps::print_projects(&token)
@@ -86,8 +100,8 @@ pub fn use_target(project_id: Option<&str>) -> Result<()> {
     }
 }
 
-pub fn list() -> Result<()> {
-    let config = load_or_select_config()?;
+pub fn list(app: Option<&str>) -> Result<()> {
+    let config = resolve_config(app)?;
     let client = Client::new(&config)?;
     let releases = client.list_releases()?;
     if releases.is_empty() {
@@ -131,13 +145,13 @@ pub fn list() -> Result<()> {
     Ok(())
 }
 
-pub fn upload(file: &Path, notes: Option<&str>) -> Result<()> {
+pub fn upload(file: &Path, notes: Option<&str>, app: Option<&str>) -> Result<()> {
     if !file.is_file() {
         bail!("file not found: {}", file.display());
     }
     detect_binary_kind(file)
         .with_context(|| format!("{} is not a valid APK or AAB", file.display()))?;
-    let config = load_or_select_config()?;
+    let config = resolve_config(app)?;
     let client = Client::new(&config)?;
     println!("Uploading {}...", file.display());
     let release = client.upload_release(file)?;
@@ -154,10 +168,10 @@ pub fn upload(file: &Path, notes: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub fn install(id: &str, signing: &SigningOptions) -> Result<()> {
+pub fn install(id: &str, signing: &SigningOptions, app: Option<&str>) -> Result<()> {
     let signing_args = signing.to_bundletool_args()?;
     let release_id = normalize_release_id(id)?;
-    let config = load_or_select_config()?;
+    let config = resolve_config(app)?;
     let client = Client::new(&config)?;
     let release = client.get_release(release_id)?;
     require_tool("adb")?;
@@ -203,9 +217,9 @@ pub fn install(id: &str, signing: &SigningOptions) -> Result<()> {
     Ok(())
 }
 
-pub fn download(id: &str, output: Option<PathBuf>) -> Result<()> {
+pub fn download(id: &str, output: Option<PathBuf>, app: Option<&str>) -> Result<()> {
     let release_id = normalize_release_id(id)?;
-    let config = load_or_select_config()?;
+    let config = resolve_config(app)?;
     let client = Client::new(&config)?;
     let release = client.get_release(release_id)?;
     println!(
