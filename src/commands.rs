@@ -13,6 +13,55 @@ use crate::auth;
 use crate::config;
 use crate::config::Config;
 
+#[derive(Default)]
+pub struct SigningOptions {
+    pub ks: Option<PathBuf>,
+    pub ks_pass: Option<String>,
+    pub ks_key_alias: Option<String>,
+    pub key_pass: Option<String>,
+}
+
+impl SigningOptions {
+    fn to_bundletool_args(&self) -> Result<Vec<String>> {
+        if self.ks.is_none()
+            && (self.ks_pass.is_some() || self.ks_key_alias.is_some() || self.key_pass.is_some())
+        {
+            bail!("--ks is required when providing keystore signing options");
+        }
+        let mut args = Vec::new();
+        if let Some(ks) = &self.ks {
+            args.push(format!("--ks={}", ks.display()));
+        }
+        if let Some(pass) = &self.ks_pass {
+            args.push(format!("--ks-pass={pass}"));
+        }
+        if let Some(alias) = &self.ks_key_alias {
+            args.push(format!("--ks-key-alias={alias}"));
+        }
+        if let Some(pass) = &self.key_pass {
+            args.push(format!("--key-pass={pass}"));
+        }
+        Ok(args)
+    }
+}
+
+fn find_debug_keystore(bases: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    bases
+        .into_iter()
+        .filter(|base| base.is_dir())
+        .map(|base| base.join(".android").join("debug.keystore"))
+        .find(|path| path.is_file())
+}
+
+fn debug_keystore() -> Option<PathBuf> {
+    let bases = [
+        std::env::var_os("ANDROID_SDK_HOME").map(PathBuf::from),
+        dirs::home_dir(),
+        std::env::var_os("HOME").map(PathBuf::from),
+    ];
+    find_debug_keystore(bases.into_iter().flatten())
+}
+
 fn load_or_select_config() -> Result<Config> {
     match config::load_optional()? {
         Some(config) => Ok(config),
@@ -105,7 +154,8 @@ pub fn upload(file: &Path, notes: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-pub fn install(id: &str) -> Result<()> {
+pub fn install(id: &str, signing: &SigningOptions) -> Result<()> {
+    let signing_args = signing.to_bundletool_args()?;
     let release_id = normalize_release_id(id)?;
     let config = load_or_select_config()?;
     let client = Client::new(&config)?;
@@ -113,6 +163,14 @@ pub fn install(id: &str) -> Result<()> {
     require_tool("adb")?;
     if release.binary_type() == "AAB" {
         require_tool("bundletool")?;
+        // With no keystore, bundletool emits an unsigned (and thus uninstallable) APK
+        // and still exits successfully, so the failure would only surface at `adb install`.
+        // fad always installs the result, so require a signing key up front.
+        if signing_args.is_empty() && debug_keystore().is_none() {
+            bail!(
+                "no keystore available to sign the AAB; installing it would fail.\nPass --ks (with --ks-pass / --ks-key-alias / --key-pass), or create a debug keystore at ~/.android/debug.keystore"
+            );
+        }
     }
     println!(
         "Installing release {} (version {})",
@@ -137,7 +195,7 @@ pub fn install(id: &str) -> Result<()> {
             let aab_path = temp_dir.path().join("app.aab");
             std::fs::rename(&download_path, &aab_path)
                 .context("failed to move the downloaded file")?;
-            build_universal_apk(temp_dir.path(), &aab_path)?
+            build_universal_apk(temp_dir.path(), &aab_path, &signing_args)?
         }
     };
     adb_install(&apk_path)?;
@@ -240,7 +298,11 @@ fn detect_binary_kind(path: &Path) -> Result<BinaryKind> {
     bail!("could not determine whether the downloaded binary is an APK or an AAB")
 }
 
-fn build_universal_apk(work_dir: &Path, aab_path: &Path) -> Result<PathBuf> {
+fn build_universal_apk(
+    work_dir: &Path,
+    aab_path: &Path,
+    signing_args: &[String],
+) -> Result<PathBuf> {
     println!("Building a universal APK with bundletool...");
     let apks_path = work_dir.join("app.apks");
     let status = Command::new("bundletool")
@@ -248,6 +310,7 @@ fn build_universal_apk(work_dir: &Path, aab_path: &Path) -> Result<PathBuf> {
         .arg(format!("--bundle={}", aab_path.display()))
         .arg(format!("--output={}", apks_path.display()))
         .arg("--mode=universal")
+        .args(signing_args)
         .status()
         .context("failed to run bundletool; make sure it is installed and on PATH")?;
     if !status.success() {
@@ -468,5 +531,60 @@ mod tests {
     #[test]
     fn summarize_neutralizes_ansi_escapes_in_notes() {
         assert_eq!(summarize("boom\x1b[31mred", 50), "boom [31mred");
+    }
+
+    #[test]
+    fn signing_args_are_empty_without_options() {
+        let opts = SigningOptions::default();
+        assert!(opts.to_bundletool_args().unwrap().is_empty());
+    }
+
+    #[test]
+    fn signing_args_include_all_bundletool_flags() {
+        let opts = SigningOptions {
+            ks: Some(PathBuf::from("/keys/release.jks")),
+            ks_pass: Some("pass:secret".to_string()),
+            ks_key_alias: Some("release".to_string()),
+            key_pass: Some("file:/keys/key.txt".to_string()),
+        };
+        assert_eq!(
+            opts.to_bundletool_args().unwrap(),
+            vec![
+                "--ks=/keys/release.jks".to_string(),
+                "--ks-pass=pass:secret".to_string(),
+                "--ks-key-alias=release".to_string(),
+                "--key-pass=file:/keys/key.txt".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn signing_args_require_keystore_when_other_options_set() {
+        let opts = SigningOptions {
+            ks_key_alias: Some("release".to_string()),
+            ..SigningOptions::default()
+        };
+        let err = opts.to_bundletool_args().unwrap_err();
+        assert!(err.to_string().contains("--ks"));
+    }
+
+    #[test]
+    fn finds_debug_keystore_in_first_matching_base() {
+        let missing = tempfile::tempdir().unwrap();
+        let present = tempfile::tempdir().unwrap();
+        let ks = present.path().join(".android").join("debug.keystore");
+        std::fs::create_dir_all(ks.parent().unwrap()).unwrap();
+        std::fs::write(&ks, "keystore").unwrap();
+
+        let found =
+            find_debug_keystore([missing.path().to_path_buf(), present.path().to_path_buf()]);
+
+        assert_eq!(found, Some(ks));
+    }
+
+    #[test]
+    fn returns_none_when_no_base_has_debug_keystore() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(find_debug_keystore([dir.path().to_path_buf()]).is_none());
     }
 }

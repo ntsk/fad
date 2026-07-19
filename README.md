@@ -53,6 +53,7 @@ fad releases              # List releases of the target app
 fad upload <FILE>         # Upload an APK/AAB as a new release
 fad upload <FILE> -n MSG  # Upload and attach release notes (-n / --notes)
 fad install <ID>          # Download and install a release
+fad install <ID> --ks KS --ks-pass P --ks-key-alias A --key-pass P  # Sign the AAB with your own keystore
 fad download <ID>         # Save a release binary to the current directory
 fad download <ID> -o DIR  # Save into the given directory (-o / --output)
 ```
@@ -97,7 +98,7 @@ The service account needs the **Firebase App Distribution Admin** role. When `GO
 - `fad login` performs OpenID Connect (OAuth 2.0) authentication in the browser and stores tokens in `~/.config/fad/credentials.json`
 - With `GOOGLE_APPLICATION_CREDENTIALS` set (and no stored login), fad signs a JWT with the service account key and exchanges it for an access token
 - APK releases are installed directly with `adb install -r`
-- AAB releases are converted to a universal APK with `bundletool build-apks --mode=universal` before installing (signed with the default debug keystore at `~/.android/debug.keystore`)
+- AAB releases are converted to a universal APK with `bundletool build-apks --mode=universal` before installing. By default bundletool signs it with the debug keystore at `~/.android/debug.keystore`; pass `--ks` / `--ks-pass` / `--ks-key-alias` / `--key-pass` to `fad install` to sign with your own keystore (e.g. the release key) instead. If no keystore is given and no debug keystore exists, `fad install` stops early rather than producing an unsigned, uninstallable APK
 
 ## Disclaimer
 
