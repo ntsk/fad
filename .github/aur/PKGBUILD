@@ -1,4 +1,4 @@
-# Maintainer: ntsk <ntsk@users.noreply.github.com>
+# Maintainer: ntsk <ntsk@ntsk.jp>
 pkgname=fad-bin
 pkgver=@@VERSION@@
 pkgrel=1

@@ -10,7 +10,7 @@ keywords = ["firebase", "app-distribution", "android", "cli", "apk"]
 categories = ["command-line-utilities", "development-tools"]
 
 [package.metadata.deb]
-maintainer = "ntsk <ntsk@users.noreply.github.com>"
+maintainer = "ntsk <ntsk@ntsk.jp>"
 section = "utils"
 priority = "optional"
 

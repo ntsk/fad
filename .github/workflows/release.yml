@@ -138,6 +138,6 @@ jobs:
           pkgname: fad-bin
           pkgbuild: aur/PKGBUILD
           commit_username: ntsk
-          commit_email: ntsk@users.noreply.github.com
+          commit_email: ntsk@ntsk.jp
           ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
           commit_message: "Update to ${{ github.ref_name }}"
