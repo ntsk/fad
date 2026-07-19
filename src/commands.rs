@@ -469,4 +469,39 @@ mod tests {
     fn summarize_neutralizes_ansi_escapes_in_notes() {
         assert_eq!(summarize("boom\x1b[31mred", 50), "boom [31mred");
     }
+
+    #[test]
+    fn signing_args_are_empty_without_options() {
+        let opts = SigningOptions::default();
+        assert!(opts.to_bundletool_args().unwrap().is_empty());
+    }
+
+    #[test]
+    fn signing_args_include_all_bundletool_flags() {
+        let opts = SigningOptions {
+            ks: Some(PathBuf::from("/keys/release.jks")),
+            ks_pass: Some("pass:secret".to_string()),
+            ks_key_alias: Some("release".to_string()),
+            key_pass: Some("file:/keys/key.txt".to_string()),
+        };
+        assert_eq!(
+            opts.to_bundletool_args().unwrap(),
+            vec![
+                "--ks=/keys/release.jks".to_string(),
+                "--ks-pass=pass:secret".to_string(),
+                "--ks-key-alias=release".to_string(),
+                "--key-pass=file:/keys/key.txt".to_string(),
+            ]
+        );
+    }
+
+    #[test]
+    fn signing_args_require_keystore_when_other_options_set() {
+        let opts = SigningOptions {
+            ks_key_alias: Some("release".to_string()),
+            ..SigningOptions::default()
+        };
+        let err = opts.to_bundletool_args().unwrap_err();
+        assert!(err.to_string().contains("--ks"));
+    }
 }
