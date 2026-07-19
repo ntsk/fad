@@ -50,3 +50,43 @@ jobs:
           files: |
             fad-*.tar.gz
             fad-*.tar.gz.sha256
+
+  update-formula:
+    name: Update Homebrew formula
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Render formula from release checksums
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          version="${TAG#v}"
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern '*.sha256' --dir sha
+          sha() { awk '{print $1}' "sha/fad-${TAG}-$1.tar.gz.sha256"; }
+          sed \
+            -e "s/@@VERSION@@/${version}/g" \
+            -e "s/@@SHA_DARWIN_ARM@@/$(sha aarch64-apple-darwin)/" \
+            -e "s/@@SHA_DARWIN_INTEL@@/$(sha x86_64-apple-darwin)/" \
+            -e "s/@@SHA_LINUX_ARM@@/$(sha aarch64-unknown-linux-gnu)/" \
+            -e "s/@@SHA_LINUX_INTEL@@/$(sha x86_64-unknown-linux-gnu)/" \
+            .github/homebrew/fad.rb > formula.rb
+      - name: Check out the Homebrew tap
+        uses: actions/checkout@v7
+        with:
+          repository: ntsk/homebrew-tap
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+      - name: Copy formula into the tap
+        run: cp formula.rb tap/Formula/fad.rb
+      - name: Open a pull request on the tap
+        uses: peter-evans/create-pull-request@v8
+        with:
+          token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          path: tap
+          branch: bump-fad-${{ github.ref_name }}
+          title: "Update fad to ${{ github.ref_name }}"
+          commit-message: "Update fad to ${{ github.ref_name }}"
+          body: "Automated formula update for fad ${{ github.ref_name }}."
+          delete-branch: true
