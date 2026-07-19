@@ -1,12 +1,13 @@
 use anyhow::{bail, Context, Result};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
+use jsonwebtoken::{encode, Algorithm, EncodingKey, Header};
 use rand::distr::{Alphanumeric, Distribution};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader, ErrorKind, Write};
 use std::net::{TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use url::Url;
 
@@ -22,6 +23,9 @@ const REVOKE_URL: &str = "https://oauth2.googleapis.com/revoke";
 const SCOPES: &str =
     "openid email https://www.googleapis.com/auth/cloud-platform https://www.googleapis.com/auth/firebase";
 const LOGIN_TIMEOUT: Duration = Duration::from_secs(300);
+const SA_SCOPE: &str = "https://www.googleapis.com/auth/cloud-platform";
+const JWT_BEARER_GRANT: &str = "urn:ietf:params:oauth:grant-type:jwt-bearer";
+const SA_TOKEN_LIFETIME: u64 = 3600;
 
 #[derive(Serialize, Deserialize)]
 struct Credentials {
@@ -140,6 +144,12 @@ fn revoke_token(token: &str) {
 }
 
 pub fn get_access_token() -> Result<String> {
+    if !credentials_path()?.exists() {
+        if let Some(path) = service_account_path() {
+            let sa = load_service_account(&path)?;
+            return service_account_access_token(&sa);
+        }
+    }
     let mut credentials = load_credentials()?;
     if credentials.expires_at > now() + 60 {
         return Ok(credentials.access_token);
@@ -169,6 +179,105 @@ pub fn get_access_token() -> Result<String> {
     }
     save_credentials(&credentials)?;
     Ok(token.access_token)
+}
+
+#[derive(Debug, Deserialize)]
+struct ServiceAccount {
+    client_email: String,
+    private_key: String,
+    #[serde(default = "default_token_uri")]
+    token_uri: String,
+    #[serde(default)]
+    private_key_id: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ServiceAccountClaims<'a> {
+    iss: &'a str,
+    scope: &'a str,
+    aud: &'a str,
+    iat: u64,
+    exp: u64,
+}
+
+fn default_token_uri() -> String {
+    TOKEN_URL.to_string()
+}
+
+fn service_account_path() -> Option<PathBuf> {
+    std::env::var_os("GOOGLE_APPLICATION_CREDENTIALS")
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn load_service_account(path: &Path) -> Result<ServiceAccount> {
+    let text = std::fs::read_to_string(path).with_context(|| {
+        format!(
+            "failed to read the service account key at {}",
+            path.display()
+        )
+    })?;
+    parse_service_account(&text)
+}
+
+fn parse_service_account(json: &str) -> Result<ServiceAccount> {
+    serde_json::from_str(json).context("failed to parse the service account key JSON")
+}
+
+fn build_assertion(sa: &ServiceAccount, now: u64) -> Result<String> {
+    let mut header = Header::new(Algorithm::RS256);
+    header.kid = sa.private_key_id.clone();
+    let key = EncodingKey::from_rsa_pem(sa.private_key.as_bytes())
+        .context("invalid service account private key")?;
+    let claims = ServiceAccountClaims {
+        iss: &sa.client_email,
+        scope: SA_SCOPE,
+        aud: &sa.token_uri,
+        iat: now,
+        exp: now + SA_TOKEN_LIFETIME,
+    };
+    encode(&header, &claims, &key).context("failed to sign the service account assertion")
+}
+
+fn service_account_access_token(sa: &ServiceAccount) -> Result<String> {
+    let assertion = build_assertion(sa, now())?;
+    let http = crate::http::client();
+    request_service_account_token(&http, &sa.token_uri, &assertion)
+}
+
+fn request_service_account_token(
+    http: &reqwest::blocking::Client,
+    token_uri: &str,
+    assertion: &str,
+) -> Result<String> {
+    let resp = http
+        .post(token_uri)
+        .form(&[("grant_type", JWT_BEARER_GRANT), ("assertion", assertion)])
+        .send()
+        .context("failed to reach the token endpoint")?;
+    if !resp.status().is_success() {
+        let status = resp.status();
+        let body = resp.text().unwrap_or_default();
+        bail!(
+            "service account token request failed ({status}): {}",
+            service_account_token_error(&body)
+        );
+    }
+    let token: TokenResponse = resp.json().context("failed to parse the token response")?;
+    Ok(token.access_token)
+}
+
+fn service_account_token_error(body: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("error_description")
+                .or_else(|| value.get("error"))
+                .and_then(|field| field.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| body.to_string())
 }
 
 fn oauth_client() -> Result<(String, String)> {
@@ -306,7 +415,9 @@ fn save_credentials(credentials: &Credentials) -> Result<()> {
 
 fn load_credentials() -> Result<Credentials> {
     let path = credentials_path()?;
-    let text = std::fs::read_to_string(&path).context("not logged in; run `fad login` first")?;
+    let text = std::fs::read_to_string(&path).context(
+        "not logged in; run `fad login` first, or set GOOGLE_APPLICATION_CREDENTIALS to a service account key",
+    )?;
     serde_json::from_str(&text)
         .with_context(|| format!("failed to parse {}; run `fad login` again", path.display()))
 }
@@ -328,6 +439,7 @@ fn email_from_id_token(token: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mockito::Matcher;
     use std::io::Read;
     use std::net::TcpStream as ClientStream;
     use std::thread;
@@ -437,5 +549,100 @@ mod tests {
         assert_eq!(email_from_id_token("a.!!!.c"), None);
         let payload = URL_SAFE_NO_PAD.encode(r#"{"sub":"123"}"#);
         assert_eq!(email_from_id_token(&format!("a.{payload}.c")), None);
+    }
+
+    const TEST_PRIVATE_KEY: &str = "-----BEGIN PRIVATE KEY-----\nMIIEvAIBADANBgkqhkiG9w0BAQEFAASCBKYwggSiAgEAAoIBAQCfwYtTneIRl8fL\nZQs1o7h35oapgKq4xkTKc49OXfZJBY5XNPuhQmODFKja4Xg6x+AcQcNeavfBg/cS\ndo9MN4oJPtwJr6s6bjr2cdLhCi2fCKYmm2GKEoprWcCHr92C7C2paO7A+zvHBr3E\nreg3C09MjjuIHBbWNr6WG6em8jVyamYKYP+i1Ybb8z1FfMWysAbOpyOiy5lMzt1j\nF6K+VV8MeGqWFWb+R9s5o6L7yXAmjh98mfkdy0qKbDwrOPYy17vcR8UEvlaqpi8t\nLNogE+/sUCEdr28T4iuFDcjFU2sQfXKCrIEW53sFQQyl4oaGCdKfkjqToPHfpKGt\n2dDJXHDTAgMBAAECggEAE7m2FlD8ROfUx4xmYe0hLczM+8jjS4VPoR+7phV7/3As\nLyBfoX2tA9ZdMwl76uYbCeIk2Vej18UPkLwK3YJODO4yBRAnuEM8DInpW9gB4g0T\nVtkApie7551hZF+Wnj/DM5O9Rx6+NsjiTZKbhZBj7jPxrdCqETEZPzeS784gQ0wl\nxvIiaQcEoHytWSB2LQCfZ+MxVQ7X7xh4gumlIBEpAJoytsGp3f0BOLpo9t9xO6qe\nYF4vcpUnrGZ4UVb24kQVJNjR9MFMgtMmSiB3TSXEmzwEVlphT8gR18gRtyH76zGM\nueN3I7KIGa8B5PN6i3CSiOp2Y68ky87p7p2Gs9+bwQKBgQDcCJb4nXx0686jshrN\nKhYUne25fGBVSXgxNOYdF5TB1EaVE6Hc7P0PRzsfMK0tabgSh64VGRQaliOhOFEx\nRNZrZu9GbIoK20POEaSizmOuouSEHH6c3A4U8b/+V+rLpBu0ZiVwXzV4ADwrFTF/\n71J3QV2X0sVBtl0o1JRnKEkx6QKBgQC53pzO3I4qoUOr/oJDBapiSvafq6pA6iSz\nKO/YGri8Cmkn3Cjbsy23ZE9nyVNuTBbnR0jHxk9ZaWVvTAP7ThXVTQrVex9gTnIp\ng5dbNO3TqtcQNkDnJ/d4JWcNZRD1DpDR3sSIlPgfvQsYXEIwQZReOz9p/k92HEEW\n+zPH/L87WwKBgHfKtWblVrzRJM86SB0qrJrM4H/7lvbX6PfhNObhz7s3NrYy2gzN\neXi37xgsCByRUgXEmKIj5S4UT5GWd527PIF8qQhOT1lZxrCKKnf4pYyOYpsKaGQ9\n6ey9MSnn84yq6+prMjbbnuCWQCu0fh6IzPzgOXRO69W60z1HfwQqiq8BAoGATX5e\n6nBSZbuutzr5nG/0Rd7zTEcKSN5WRsw+k18wvlWo2hGUh2UBHoEYCjGKM2ZN9kdm\nNMSduK2UuP58en5n4/KnHbKjtkd+mYhfxosezS1hVUUJclbbeqA9gvwsQb+86YNz\ndW6GtNTgl1t/zRbKgS86lTqObrQA/0/kmvDp2hkCgYBGxnAUQ2Zxm2h8D0M/dTWd\nRzE6PgnhIhhQJM2ydEwpOn9W9MnixCTVH3lZJ25WmtBhWLBoRFYj1KDDODD0sUIM\nJQSVN6ZtqSiYp86uq0W4AASfb4JwbBJqBmmbO8vTPX/RmN61Ou3edwm0lxlMZeSu\nVF203+OAA3KBE2OFlN243Q==\n-----END PRIVATE KEY-----\n";
+
+    fn test_service_account(token_uri: &str) -> ServiceAccount {
+        parse_service_account(
+            &serde_json::json!({
+                "type": "service_account",
+                "client_email": "fad@my-project.iam.gserviceaccount.com",
+                "private_key_id": "kid-123",
+                "private_key": TEST_PRIVATE_KEY,
+                "token_uri": token_uri,
+            })
+            .to_string(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn parses_service_account_key_fields() {
+        let sa = parse_service_account(
+            &serde_json::json!({
+                "type": "service_account",
+                "client_email": "fad@my-project.iam.gserviceaccount.com",
+                "private_key": TEST_PRIVATE_KEY,
+            })
+            .to_string(),
+        )
+        .unwrap();
+
+        assert_eq!(sa.client_email, "fad@my-project.iam.gserviceaccount.com");
+        assert_eq!(sa.token_uri, TOKEN_URL);
+    }
+
+    #[test]
+    fn rejects_non_service_account_json() {
+        let err = parse_service_account(r#"{"client_id":"x"}"#).unwrap_err();
+        assert!(err.to_string().contains("service account"));
+    }
+
+    #[test]
+    fn assertion_carries_jwt_bearer_claims() {
+        let sa = test_service_account("https://oauth2.googleapis.com/token");
+
+        let assertion = build_assertion(&sa, 1_000_000).unwrap();
+
+        let claims_segment = assertion.split('.').nth(1).unwrap();
+        let bytes = URL_SAFE_NO_PAD.decode(claims_segment).unwrap();
+        let claims: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(claims["iss"], "fad@my-project.iam.gserviceaccount.com");
+        assert_eq!(claims["aud"], "https://oauth2.googleapis.com/token");
+        assert_eq!(claims["scope"], SA_SCOPE);
+        assert_eq!(claims["iat"], 1_000_000);
+        assert_eq!(claims["exp"], 1_000_000 + 3600);
+    }
+
+    #[test]
+    fn token_exchange_uses_jwt_bearer_grant() {
+        let mut server = mockito::Server::new();
+        let mock = server
+            .mock("POST", "/token")
+            .match_body(Matcher::AllOf(vec![
+                Matcher::UrlEncoded(
+                    "grant_type".into(),
+                    "urn:ietf:params:oauth:grant-type:jwt-bearer".into(),
+                ),
+                Matcher::UrlEncoded("assertion".into(), "signed-jwt".into()),
+            ]))
+            .with_body(r#"{"access_token":"sa-token","expires_in":3600}"#)
+            .create();
+
+        let http = crate::http::client();
+        let token =
+            request_service_account_token(&http, &format!("{}/token", server.url()), "signed-jwt")
+                .unwrap();
+
+        assert_eq!(token, "sa-token");
+        mock.assert();
+    }
+
+    #[test]
+    fn token_exchange_surfaces_error_body() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/token")
+            .with_status(400)
+            .with_body(r#"{"error":"invalid_grant","error_description":"bad key"}"#)
+            .create();
+
+        let http = crate::http::client();
+        let err =
+            request_service_account_token(&http, &format!("{}/token", server.url()), "signed-jwt")
+                .unwrap_err();
+
+        assert!(err.to_string().contains("bad key"));
     }
 }

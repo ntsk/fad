@@ -19,6 +19,7 @@ clap = { version = "4", features = ["derive"] }
 dialoguer = "0.12"
 dirs = "6"
 indicatif = "0.18"
+jsonwebtoken = "9"
 open = "5"
 rand = "0.10"
 reqwest = { version = "0.13", features = ["blocking", "json", "query", "form"] }
