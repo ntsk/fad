@@ -542,4 +542,26 @@ mod tests {
         let err = opts.to_bundletool_args().unwrap_err();
         assert!(err.to_string().contains("--ks"));
     }
+
+    #[test]
+    fn finds_debug_keystore_in_first_matching_base() {
+        let missing = tempfile::tempdir().unwrap();
+        let present = tempfile::tempdir().unwrap();
+        let ks = present.path().join(".android").join("debug.keystore");
+        std::fs::create_dir_all(ks.parent().unwrap()).unwrap();
+        std::fs::write(&ks, "keystore").unwrap();
+
+        let found = find_debug_keystore([
+            missing.path().to_path_buf(),
+            present.path().to_path_buf(),
+        ]);
+
+        assert_eq!(found, Some(ks));
+    }
+
+    #[test]
+    fn returns_none_when_no_base_has_debug_keystore() {
+        let dir = tempfile::tempdir().unwrap();
+        assert!(find_debug_keystore([dir.path().to_path_buf()]).is_none());
+    }
 }
