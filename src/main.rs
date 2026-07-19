@@ -49,6 +49,30 @@ enum Command {
     Install {
         #[arg(value_name = "ID", help = "Release ID to install")]
         id: String,
+        #[arg(
+            long,
+            value_name = "PATH",
+            help = "Keystore used to sign AAB installs (bundletool --ks); defaults to the debug keystore"
+        )]
+        ks: Option<std::path::PathBuf>,
+        #[arg(
+            long = "ks-pass",
+            value_name = "VALUE",
+            help = "Keystore password, e.g. pass:secret or file:/path (bundletool --ks-pass)"
+        )]
+        ks_pass: Option<String>,
+        #[arg(
+            long = "ks-key-alias",
+            value_name = "ALIAS",
+            help = "Key alias within the keystore (bundletool --ks-key-alias)"
+        )]
+        ks_key_alias: Option<String>,
+        #[arg(
+            long = "key-pass",
+            value_name = "VALUE",
+            help = "Key password, e.g. pass:secret or file:/path (bundletool --key-pass)"
+        )]
+        key_pass: Option<String>,
     },
     #[command(about = "Download a release binary without installing")]
     Download {
@@ -72,7 +96,21 @@ fn main() -> Result<()> {
         Command::Use { project_id } => commands::use_target(project_id.as_deref()),
         Command::Releases => commands::list(),
         Command::Upload { file, notes } => commands::upload(&file, notes.as_deref()),
-        Command::Install { id } => commands::install(&id),
+        Command::Install {
+            id,
+            ks,
+            ks_pass,
+            ks_key_alias,
+            key_pass,
+        } => commands::install(
+            &id,
+            &commands::SigningOptions {
+                ks,
+                ks_pass,
+                ks_key_alias,
+                key_pass,
+            },
+        ),
         Command::Download { id, output } => commands::download(&id, output),
     }
 }
