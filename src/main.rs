@@ -32,7 +32,10 @@ enum Command {
         project_id: Option<String>,
     },
     #[command(about = "List releases of the target app")]
-    Releases,
+    Releases {
+        #[arg(long, value_name = "APP_ID", help = APP_HELP)]
+        app: Option<String>,
+    },
     #[command(about = "Upload an APK/AAB as a new release")]
     Upload {
         #[arg(value_name = "FILE", help = "Path to the APK or AAB to upload")]
@@ -44,6 +47,8 @@ enum Command {
             help = "Release notes to attach to the uploaded build"
         )]
         notes: Option<String>,
+        #[arg(long, value_name = "APP_ID", help = APP_HELP)]
+        app: Option<String>,
     },
     #[command(about = "Download and install a release")]
     Install {
@@ -73,6 +78,8 @@ enum Command {
             help = "Key password, e.g. pass:secret or file:/path (bundletool --key-pass)"
         )]
         key_pass: Option<String>,
+        #[arg(long, value_name = "APP_ID", help = APP_HELP)]
+        app: Option<String>,
     },
     #[command(about = "Download a release binary without installing")]
     Download {
@@ -85,8 +92,12 @@ enum Command {
             help = "Directory to save the binary into (defaults to the current directory)"
         )]
         output: Option<std::path::PathBuf>,
+        #[arg(long, value_name = "APP_ID", help = APP_HELP)]
+        app: Option<String>,
     },
 }
+
+const APP_HELP: &str = "Target Firebase App ID (overrides the app_id in config.toml)";
 
 fn main() -> Result<()> {
     match Cli::parse().command {
@@ -94,14 +105,17 @@ fn main() -> Result<()> {
         Command::Logout => auth::logout(),
         Command::Projects => commands::projects(),
         Command::Use { project_id } => commands::use_target(project_id.as_deref()),
-        Command::Releases => commands::list(),
-        Command::Upload { file, notes } => commands::upload(&file, notes.as_deref()),
+        Command::Releases { app } => commands::list(app.as_deref()),
+        Command::Upload { file, notes, app } => {
+            commands::upload(&file, notes.as_deref(), app.as_deref())
+        }
         Command::Install {
             id,
             ks,
             ks_pass,
             ks_key_alias,
             key_pass,
+            app,
         } => commands::install(
             &id,
             &commands::SigningOptions {
@@ -110,7 +124,8 @@ fn main() -> Result<()> {
                 ks_key_alias,
                 key_pass,
             },
+            app.as_deref(),
         ),
-        Command::Download { id, output } => commands::download(&id, output),
+        Command::Download { id, output, app } => commands::download(&id, output, app.as_deref()),
     }
 }
