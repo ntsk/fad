@@ -23,10 +23,10 @@ brew install ntsk/tap/fad
 
 ### Debian / Ubuntu
 
-Download the `.deb` for your architecture (amd64 or arm64) from the [latest release](https://github.com/ntsk/fad/releases/latest), then:
+Download the `.deb` for your architecture (amd64 or arm64) from the [latest release](https://github.com/ntsk/fad/releases/latest), then install the file you downloaded:
 
 ```bash
-sudo apt install ./fad-*.deb
+sudo apt install ./<DOWNLOADED>.deb
 ```
 
 ### Arch Linux (AUR)
