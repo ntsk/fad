@@ -21,6 +21,30 @@ Unlike the Firebase App Tester app, `fad` installs a release straight onto a con
 brew install ntsk/tap/fad
 ```
 
+### Debian / Ubuntu
+
+Download the `.deb` for your architecture (amd64 or arm64) from the [latest release](https://github.com/ntsk/fad/releases/latest), then:
+
+```bash
+sudo apt install ./fad-*.deb
+```
+
+### Arch Linux (AUR)
+
+Available on the AUR as [`fad-bin`](https://aur.archlinux.org/packages/fad-bin):
+
+```bash
+yay -S fad-bin   # or: paru -S fad-bin
+```
+
+Without an AUR helper, build and install it with `makepkg`:
+
+```bash
+git clone https://aur.archlinux.org/fad-bin.git
+cd fad-bin
+makepkg -si
+```
+
 ### Nix
 
 ```bash
