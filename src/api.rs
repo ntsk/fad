@@ -66,7 +66,26 @@ struct OperationError {
 #[serde(rename_all = "camelCase")]
 struct UploadReleaseResponse {
     #[serde(default)]
+    result: Option<String>,
+    #[serde(default)]
     release: Option<Release>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadResult {
+    Created,
+    Updated,
+    Unmodified,
+}
+
+impl UploadResult {
+    fn from_api(result: Option<&str>) -> Self {
+        match result {
+            Some("RELEASE_UPDATED") => Self::Updated,
+            Some("RELEASE_UNMODIFIED") => Self::Unmodified,
+            _ => Self::Created,
+        }
+    }
 }
 
 impl Release {
@@ -239,7 +258,7 @@ impl Client {
         Ok(())
     }
 
-    pub fn upload_release(&self, path: &Path) -> Result<Release> {
+    pub fn upload_release(&self, path: &Path) -> Result<(Release, UploadResult)> {
         let bytes =
             std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
         let file_name = path
@@ -261,17 +280,21 @@ impl Client {
         self.await_operation(operation)
     }
 
-    fn await_operation(&self, mut operation: Operation) -> Result<Release> {
+    fn await_operation(&self, mut operation: Operation) -> Result<(Release, UploadResult)> {
         let deadline = Instant::now() + UPLOAD_POLL_TIMEOUT;
         loop {
             if let Some(error) = operation.error {
                 bail!("the upload could not be processed: {}", error.message);
             }
             if operation.done {
-                return operation
+                let response = operation
                     .response
-                    .and_then(|response| response.release)
-                    .context("the upload finished but no release was returned");
+                    .context("the upload finished but no release was returned")?;
+                let result = UploadResult::from_api(response.result.as_deref());
+                let release = response
+                    .release
+                    .context("the upload finished but no release was returned")?;
+                return Ok((release, result));
             }
             if Instant::now() >= deadline {
                 bail!("timed out waiting for the uploaded binary to be processed");
@@ -535,19 +558,75 @@ mod tests {
                 "/projects/1/apps/1:1:android:a/releases/-/operations/op1",
             )
             .with_body(
-                r#"{"name":"op1","done":true,"response":{"release":{"name":"projects/1/apps/a/releases/r7","displayVersion":"1.2.3","buildVersion":"45"}}}"#,
+                r#"{"name":"op1","done":true,"response":{"result":"RELEASE_CREATED","release":{"name":"projects/1/apps/a/releases/r7","displayVersion":"1.2.3","buildVersion":"45"}}}"#,
             )
             .create();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("app.apk");
         std::fs::write(&path, "apk-bytes").unwrap();
 
-        let release = test_client(&server).upload_release(&path).unwrap();
+        let (release, result) = test_client(&server).upload_release(&path).unwrap();
 
         assert_eq!(release.id(), "r7");
         assert_eq!(release.version(), "1.2.3 (45)");
+        assert_eq!(result, UploadResult::Created);
         upload.assert();
         poll.assert();
+    }
+
+    #[test]
+    fn upload_release_reports_unmodified_result() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/projects/1/apps/1:1:android:a/releases:upload")
+            .with_body(
+                r#"{"name":"op1","done":true,"response":{"@type":"type.googleapis.com/google.firebase.appdistro.v1.UploadReleaseResponse","result":"RELEASE_UNMODIFIED","release":{"name":"projects/1/apps/a/releases/r7","releaseNotes":{"text":"E2E roundtrip"},"displayVersion":"1.0","buildVersion":"1"}}}"#,
+            )
+            .create();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.apk");
+        std::fs::write(&path, "apk-bytes").unwrap();
+
+        let (release, result) = test_client(&server).upload_release(&path).unwrap();
+
+        assert_eq!(release.id(), "r7");
+        assert_eq!(result, UploadResult::Unmodified);
+    }
+
+    #[test]
+    fn upload_release_reports_updated_result() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/projects/1/apps/1:1:android:a/releases:upload")
+            .with_body(
+                r#"{"name":"op1","done":true,"response":{"result":"RELEASE_UPDATED","release":{"name":"projects/1/apps/a/releases/r7"}}}"#,
+            )
+            .create();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.apk");
+        std::fs::write(&path, "apk-bytes").unwrap();
+
+        let (_, result) = test_client(&server).upload_release(&path).unwrap();
+
+        assert_eq!(result, UploadResult::Updated);
+    }
+
+    #[test]
+    fn upload_release_defaults_to_created_without_result() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/projects/1/apps/1:1:android:a/releases:upload")
+            .with_body(
+                r#"{"name":"op1","done":true,"response":{"release":{"name":"projects/1/apps/a/releases/r7"}}}"#,
+            )
+            .create();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.apk");
+        std::fs::write(&path, "apk-bytes").unwrap();
+
+        let (_, result) = test_client(&server).upload_release(&path).unwrap();
+
+        assert_eq!(result, UploadResult::Created);
     }
 
     #[test]

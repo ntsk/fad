@@ -7,7 +7,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use zip::ZipArchive;
 
-use crate::api::{Client, Release};
+use crate::api::{Client, Release, UploadResult};
 use crate::apps;
 use crate::auth;
 use crate::config;
@@ -154,18 +154,34 @@ pub fn upload(file: &Path, notes: Option<&str>, app: Option<&str>) -> Result<()>
     let config = resolve_config(app)?;
     let client = Client::new(&config)?;
     println!("Uploading {}...", file.display());
-    let release = client.upload_release(file)?;
-    println!(
-        "Release created: {} (version {})",
-        release.id(),
-        release.version()
-    );
+    let (release, result) = client.upload_release(file)?;
+    println!("{}", upload_message(&release, result));
     if let Some(notes) = notes {
         client.set_release_notes(&release.name, notes)?;
         println!("Release notes set");
     }
     println!("Run `fad releases` to see it");
     Ok(())
+}
+
+fn upload_message(release: &Release, result: UploadResult) -> String {
+    match result {
+        UploadResult::Created => format!(
+            "Release created: {} (version {})",
+            release.id(),
+            release.version()
+        ),
+        UploadResult::Updated => format!(
+            "Release updated: {} (version {})",
+            release.id(),
+            release.version()
+        ),
+        UploadResult::Unmodified => format!(
+            "This binary already exists as release {} (version {}); no new release was created",
+            release.id(),
+            release.version()
+        ),
+    }
 }
 
 pub fn install(id: &str, signing: &SigningOptions, app: Option<&str>) -> Result<()> {
@@ -612,5 +628,28 @@ mod tests {
     #[test]
     fn app_flag_rejects_invalid_app_id() {
         assert!(resolve_config(Some("not-an-app-id")).is_err());
+    }
+
+    #[test]
+    fn upload_message_varies_by_result() {
+        let release: Release = serde_json::from_value(serde_json::json!({
+            "name": "projects/1/apps/a/releases/r7",
+            "displayVersion": "1.0",
+            "buildVersion": "1"
+        }))
+        .unwrap();
+
+        assert_eq!(
+            upload_message(&release, UploadResult::Created),
+            "Release created: r7 (version 1.0 (1))"
+        );
+        assert_eq!(
+            upload_message(&release, UploadResult::Updated),
+            "Release updated: r7 (version 1.0 (1))"
+        );
+        assert_eq!(
+            upload_message(&release, UploadResult::Unmodified),
+            "This binary already exists as release r7 (version 1.0 (1)); no new release was created"
+        );
     }
 }
