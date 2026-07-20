@@ -535,19 +535,75 @@ mod tests {
                 "/projects/1/apps/1:1:android:a/releases/-/operations/op1",
             )
             .with_body(
-                r#"{"name":"op1","done":true,"response":{"release":{"name":"projects/1/apps/a/releases/r7","displayVersion":"1.2.3","buildVersion":"45"}}}"#,
+                r#"{"name":"op1","done":true,"response":{"result":"RELEASE_CREATED","release":{"name":"projects/1/apps/a/releases/r7","displayVersion":"1.2.3","buildVersion":"45"}}}"#,
             )
             .create();
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("app.apk");
         std::fs::write(&path, "apk-bytes").unwrap();
 
-        let release = test_client(&server).upload_release(&path).unwrap();
+        let (release, result) = test_client(&server).upload_release(&path).unwrap();
 
         assert_eq!(release.id(), "r7");
         assert_eq!(release.version(), "1.2.3 (45)");
+        assert_eq!(result, UploadResult::Created);
         upload.assert();
         poll.assert();
+    }
+
+    #[test]
+    fn upload_release_reports_unmodified_result() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/projects/1/apps/1:1:android:a/releases:upload")
+            .with_body(
+                r#"{"name":"op1","done":true,"response":{"@type":"type.googleapis.com/google.firebase.appdistro.v1.UploadReleaseResponse","result":"RELEASE_UNMODIFIED","release":{"name":"projects/1/apps/a/releases/r7","releaseNotes":{"text":"E2E roundtrip"},"displayVersion":"1.0","buildVersion":"1"}}}"#,
+            )
+            .create();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.apk");
+        std::fs::write(&path, "apk-bytes").unwrap();
+
+        let (release, result) = test_client(&server).upload_release(&path).unwrap();
+
+        assert_eq!(release.id(), "r7");
+        assert_eq!(result, UploadResult::Unmodified);
+    }
+
+    #[test]
+    fn upload_release_reports_updated_result() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/projects/1/apps/1:1:android:a/releases:upload")
+            .with_body(
+                r#"{"name":"op1","done":true,"response":{"result":"RELEASE_UPDATED","release":{"name":"projects/1/apps/a/releases/r7"}}}"#,
+            )
+            .create();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.apk");
+        std::fs::write(&path, "apk-bytes").unwrap();
+
+        let (_, result) = test_client(&server).upload_release(&path).unwrap();
+
+        assert_eq!(result, UploadResult::Updated);
+    }
+
+    #[test]
+    fn upload_release_defaults_to_created_without_result() {
+        let mut server = mockito::Server::new();
+        server
+            .mock("POST", "/projects/1/apps/1:1:android:a/releases:upload")
+            .with_body(
+                r#"{"name":"op1","done":true,"response":{"release":{"name":"projects/1/apps/a/releases/r7"}}}"#,
+            )
+            .create();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("app.apk");
+        std::fs::write(&path, "apk-bytes").unwrap();
+
+        let (_, result) = test_client(&server).upload_release(&path).unwrap();
+
+        assert_eq!(result, UploadResult::Created);
     }
 
     #[test]
