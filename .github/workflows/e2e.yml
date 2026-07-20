@@ -60,7 +60,9 @@ jobs:
         run: |
           ./target/release/fad download "$APK_ID" --app "$FAD_APP_ID" -o downloaded
           ls -la downloaded
-          ./target/release/fad upload downloaded/*.apk --app "$FAD_APP_ID" -n "E2E roundtrip $GITHUB_RUN_ID"
+          NOTES="E2E roundtrip $GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          ./target/release/fad upload downloaded/*.apk --app "$FAD_APP_ID" -n "$NOTES"
+          ./target/release/fad releases --app "$FAD_APP_ID" | grep -F "$NOTES"
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
