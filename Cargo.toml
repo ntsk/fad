@@ -1,6 +1,6 @@
 [package]
 name = "fad"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 description = "CLI tool to upload, download, and install APK/AAB releases on Firebase App Distribution"
 license = "MIT"
