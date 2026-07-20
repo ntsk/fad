@@ -1,0 +1,79 @@
+name: E2E
+
+on:
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  FAD_APP_ID: ${{ vars.FAD_APP_ID }}
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+      - name: Build fad
+        run: cargo build --release --locked
+      - uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          distribution: temurin
+          java-version: "17"
+      - name: Install bundletool
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/bundletool.jar" \
+            https://github.com/google/bundletool/releases/download/1.18.3/bundletool-all-1.18.3.jar
+          printf '#!/usr/bin/env bash\nexec java -jar "%s/bundletool.jar" "$@"\n' "$RUNNER_TEMP" \
+            | sudo tee /usr/local/bin/bundletool >/dev/null
+          sudo chmod +x /usr/local/bin/bundletool
+          bundletool version
+      - name: Create debug keystore
+        run: |
+          mkdir -p ~/.android
+          keytool -genkeypair -keystore ~/.android/debug.keystore \
+            -storepass android -keypass android -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+      - name: Configure service account
+        env:
+          SERVICE_ACCOUNT_KEY: ${{ secrets.FAD_SERVICE_ACCOUNT_KEY }}
+        run: |
+          printf '%s' "$SERVICE_ACCOUNT_KEY" > "$RUNNER_TEMP/service-account.json"
+          echo "GOOGLE_APPLICATION_CREDENTIALS=$RUNNER_TEMP/service-account.json" >> "$GITHUB_ENV"
+      - name: Resolve latest APK and AAB releases
+        run: |
+          ./target/release/fad releases --app "$FAD_APP_ID" | tee releases.txt
+          APK_ID=$(awk '/ APK /{print $1; exit}' releases.txt)
+          AAB_ID=$(awk '/ AAB /{print $1; exit}' releases.txt)
+          test -n "$APK_ID" || { echo "no APK release found"; exit 1; }
+          test -n "$AAB_ID" || { echo "no AAB release found"; exit 1; }
+          echo "APK_ID=$APK_ID" >> "$GITHUB_ENV"
+          echo "AAB_ID=$AAB_ID" >> "$GITHUB_ENV"
+      - name: Download and re-upload roundtrip
+        run: |
+          ./target/release/fad download "$APK_ID" --app "$FAD_APP_ID" -o downloaded
+          ls -la downloaded
+          ./target/release/fad upload downloaded/*.apk --app "$FAD_APP_ID" -n "E2E roundtrip $GITHUB_RUN_ID"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Install latest APK and AAB on an emulator
+        uses: reactivecircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: 34
+          arch: x86_64
+          script: |
+            ./target/release/fad install "$APK_ID" --app "$FAD_APP_ID"
+            adb shell pm list packages | grep -q jp.ntsk.fad.test.app
+            adb uninstall jp.ntsk.fad.test.app
+            ./target/release/fad install "$AAB_ID" --app "$FAD_APP_ID"
+            adb shell pm list packages | grep -q jp.ntsk.fad.test.app
