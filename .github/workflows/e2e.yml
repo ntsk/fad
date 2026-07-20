@@ -58,9 +58,15 @@ jobs:
           echo "AAB_ID=$AAB_ID" >> "$GITHUB_ENV"
       - name: Download and re-upload roundtrip
         run: |
+          NOTES="E2E roundtrip $GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           ./target/release/fad download "$APK_ID" --app "$FAD_APP_ID" -o downloaded
+          ./target/release/fad download "$AAB_ID" --app "$FAD_APP_ID" -o downloaded
           ls -la downloaded
-          ./target/release/fad upload downloaded/*.apk --app "$FAD_APP_ID" -n "E2E roundtrip $GITHUB_RUN_ID"
+          ./target/release/fad upload downloaded/*.apk --app "$FAD_APP_ID" -n "$NOTES (APK)"
+          ./target/release/fad upload downloaded/*.aab --app "$FAD_APP_ID" -n "$NOTES (AAB)"
+          ./target/release/fad releases --app "$FAD_APP_ID" | tee releases-after.txt
+          grep -F "$NOTES (APK)" releases-after.txt
+          grep -F "$NOTES (AAB)" releases-after.txt
       - name: Enable KVM
         run: |
           echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
