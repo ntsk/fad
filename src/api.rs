@@ -66,7 +66,26 @@ struct OperationError {
 #[serde(rename_all = "camelCase")]
 struct UploadReleaseResponse {
     #[serde(default)]
+    result: Option<String>,
+    #[serde(default)]
     release: Option<Release>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UploadResult {
+    Created,
+    Updated,
+    Unmodified,
+}
+
+impl UploadResult {
+    fn from_api(result: Option<&str>) -> Self {
+        match result {
+            Some("RELEASE_UPDATED") => Self::Updated,
+            Some("RELEASE_UNMODIFIED") => Self::Unmodified,
+            _ => Self::Created,
+        }
+    }
 }
 
 impl Release {
@@ -239,7 +258,7 @@ impl Client {
         Ok(())
     }
 
-    pub fn upload_release(&self, path: &Path) -> Result<Release> {
+    pub fn upload_release(&self, path: &Path) -> Result<(Release, UploadResult)> {
         let bytes =
             std::fs::read(path).with_context(|| format!("failed to read {}", path.display()))?;
         let file_name = path
@@ -261,17 +280,21 @@ impl Client {
         self.await_operation(operation)
     }
 
-    fn await_operation(&self, mut operation: Operation) -> Result<Release> {
+    fn await_operation(&self, mut operation: Operation) -> Result<(Release, UploadResult)> {
         let deadline = Instant::now() + UPLOAD_POLL_TIMEOUT;
         loop {
             if let Some(error) = operation.error {
                 bail!("the upload could not be processed: {}", error.message);
             }
             if operation.done {
-                return operation
+                let response = operation
                     .response
-                    .and_then(|response| response.release)
-                    .context("the upload finished but no release was returned");
+                    .context("the upload finished but no release was returned")?;
+                let result = UploadResult::from_api(response.result.as_deref());
+                let release = response
+                    .release
+                    .context("the upload finished but no release was returned")?;
+                return Ok((release, result));
             }
             if Instant::now() >= deadline {
                 bail!("timed out waiting for the uploaded binary to be processed");

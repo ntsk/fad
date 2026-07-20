@@ -7,7 +7,7 @@ use std::process::Command;
 use anyhow::{bail, Context, Result};
 use zip::ZipArchive;
 
-use crate::api::{Client, Release};
+use crate::api::{Client, Release, UploadResult};
 use crate::apps;
 use crate::auth;
 use crate::config;
@@ -154,18 +154,34 @@ pub fn upload(file: &Path, notes: Option<&str>, app: Option<&str>) -> Result<()>
     let config = resolve_config(app)?;
     let client = Client::new(&config)?;
     println!("Uploading {}...", file.display());
-    let release = client.upload_release(file)?;
-    println!(
-        "Release created: {} (version {})",
-        release.id(),
-        release.version()
-    );
+    let (release, result) = client.upload_release(file)?;
+    println!("{}", upload_message(&release, result));
     if let Some(notes) = notes {
         client.set_release_notes(&release.name, notes)?;
         println!("Release notes set");
     }
     println!("Run `fad releases` to see it");
     Ok(())
+}
+
+fn upload_message(release: &Release, result: UploadResult) -> String {
+    match result {
+        UploadResult::Created => format!(
+            "Release created: {} (version {})",
+            release.id(),
+            release.version()
+        ),
+        UploadResult::Updated => format!(
+            "Release updated: {} (version {})",
+            release.id(),
+            release.version()
+        ),
+        UploadResult::Unmodified => format!(
+            "This binary already exists as release {} (version {}); no new release was created",
+            release.id(),
+            release.version()
+        ),
+    }
 }
 
 pub fn install(id: &str, signing: &SigningOptions, app: Option<&str>) -> Result<()> {
