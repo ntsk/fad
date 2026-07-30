@@ -1,4 +1,4 @@
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs::File;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -184,7 +184,12 @@ fn upload_message(release: &Release, result: UploadResult) -> String {
     }
 }
 
-pub fn install(id: &str, signing: &SigningOptions, app: Option<&str>) -> Result<()> {
+pub fn install(
+    id: &str,
+    signing: &SigningOptions,
+    serial: Option<&str>,
+    app: Option<&str>,
+) -> Result<()> {
     let signing_args = signing.to_bundletool_args()?;
     let release_id = normalize_release_id(id)?;
     let config = resolve_config(app)?;
@@ -228,7 +233,7 @@ pub fn install(id: &str, signing: &SigningOptions, app: Option<&str>) -> Result<
             build_universal_apk(temp_dir.path(), &aab_path, &signing_args)?
         }
     };
-    adb_install(&apk_path)?;
+    adb_install(serial, &apk_path)?;
     println!("Install complete");
     Ok(())
 }
@@ -386,12 +391,22 @@ fn is_executable(path: &Path) -> bool {
     path.is_file() || path.with_extension("exe").is_file()
 }
 
-fn adb_install(apk_path: &Path) -> Result<()> {
+fn adb_install_args(serial: Option<&str>, apk_path: &Path) -> Vec<OsString> {
+    let mut args = Vec::new();
+    if let Some(serial) = serial {
+        args.push(OsString::from("-s"));
+        args.push(OsString::from(serial));
+    }
+    args.push(OsString::from("install"));
+    args.push(OsString::from("-r"));
+    args.push(apk_path.as_os_str().to_os_string());
+    args
+}
+
+fn adb_install(serial: Option<&str>, apk_path: &Path) -> Result<()> {
     println!("Installing with adb...");
     let status = Command::new("adb")
-        .arg("install")
-        .arg("-r")
-        .arg(apk_path)
+        .args(adb_install_args(serial, apk_path))
         .status()
         .context("failed to run adb; make sure it is installed and on PATH")?;
     if !status.success() {

@@ -78,6 +78,13 @@ enum Command {
             help = "Key password, e.g. pass:secret or file:/path (bundletool --key-pass)"
         )]
         key_pass: Option<String>,
+        #[arg(
+            short = 's',
+            long,
+            value_name = "SERIAL",
+            help = "Device serial to install to (adb -s); defaults to $ANDROID_SERIAL"
+        )]
+        serial: Option<String>,
         #[arg(long, value_name = "APP_ID", help = APP_HELP)]
         app: Option<String>,
     },
@@ -115,6 +122,7 @@ fn main() -> Result<()> {
             ks_pass,
             ks_key_alias,
             key_pass,
+            serial,
             app,
         } => commands::install(
             &id,
@@ -124,6 +132,7 @@ fn main() -> Result<()> {
                 ks_key_alias,
                 key_pass,
             },
+            serial.as_deref(),
             app.as_deref(),
         ),
         Command::Download { id, output, app } => commands::download(&id, output, app.as_deref()),
