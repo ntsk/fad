@@ -19,7 +19,7 @@ mockito = "1"
 
 [dependencies]
 anyhow = "1"
-base64 = "0.22"
+base64 = "0.23"
 clap = { version = "4", features = ["derive"] }
 dialoguer = "0.12"
 dirs = "6"
