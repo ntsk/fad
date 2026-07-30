@@ -14,6 +14,9 @@ use url::Url;
 use crate::apps;
 use crate::config;
 
+// Public OAuth client for installed apps, quoted from firebase-tools:
+// https://github.com/firebase/firebase-tools/blob/e4f28d5083949ecfc37fef1b84380a14d1f2a589/src/api.ts#L10-L18
+// An installed app cannot keep a secret (RFC 8252), so this is not confidential.
 const DEFAULT_CLIENT_ID: &str =
     "563584335869-fgrhgmd47bqnekij5i8b5pr03ho849e6.apps.googleusercontent.com";
 const DEFAULT_CLIENT_SECRET: &str = "j9iVZfS8kkCEFUPaAeJV0sAi";
