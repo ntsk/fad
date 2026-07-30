@@ -423,6 +423,7 @@ fn summarize(notes: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::ffi::OsString;
     use std::io::Write;
     use zip::write::SimpleFileOptions;
 
@@ -491,6 +492,32 @@ mod tests {
         std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o644)).unwrap();
         let paths = std::env::join_paths([dir.path()]).unwrap();
         assert!(!find_in_paths(&paths, "sometool"));
+    }
+
+    #[test]
+    fn builds_adb_install_args_without_serial() {
+        assert_eq!(
+            adb_install_args(None, Path::new("/tmp/app.apk")),
+            vec![
+                OsString::from("install"),
+                OsString::from("-r"),
+                OsString::from("/tmp/app.apk"),
+            ]
+        );
+    }
+
+    #[test]
+    fn builds_adb_install_args_with_serial() {
+        assert_eq!(
+            adb_install_args(Some("emulator-5554"), Path::new("/tmp/app.apk")),
+            vec![
+                OsString::from("-s"),
+                OsString::from("emulator-5554"),
+                OsString::from("install"),
+                OsString::from("-r"),
+                OsString::from("/tmp/app.apk"),
+            ]
+        );
     }
 
     #[test]
