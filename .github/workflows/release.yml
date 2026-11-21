@@ -51,7 +51,7 @@ jobs:
           shasum -a 256 "$staging.tar.gz" > "$staging.tar.gz.sha256"
       - name: Install cargo-deb
         if: contains(matrix.target, 'linux')
-        uses: taiki-e/install-action@75a7c0f87bd666af3cdb75c5b9e9d03ab6044e6f # v2.90.6
+        uses: taiki-e/install-action@25f51f6b1bf4e18876107cece836f4f77ac17c8c # v2.90.7
         with:
           tool: cargo-deb
       - name: Build .deb
